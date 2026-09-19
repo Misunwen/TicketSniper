@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "TicketSniper 搶票狙擊手",
+  "name": "TicketSniper",
   "version": "1.1",
-  "description": "整合自動點擊搶票與地端 AI 驗證碼辨識（tixcraft / kktix / ibon）",
+  "description": "Chrome 擴充功能 + 地端 ddddocr 驗證碼辨識（網頁表單自動化）",
   "icons": {
     "16": "icon.png",
     "48": "icon.png",

@@ -34,7 +34,7 @@ REQUIRED_DDDDOCR = '1.5.6'
 CFT_JSON = "https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json"
 
 DEFAULTS = {
-    "url": "https://tixcraft.com/",
+    "url": "",
     "user_data_dir": "chrome_profile",
     "browser_executable_path": "",
     "auto_download_chromium": True,
@@ -210,6 +210,7 @@ async def main():
     cfg = load_config()
     profile = resolve(cfg['user_data_dir'])
     ext = resolve(cfg['extension_dir'])
+    url = (cfg.get('url') or '').strip()
     profile.mkdir(parents=True, exist_ok=True)
 
     # 1) OCR 伺服器
@@ -238,7 +239,7 @@ async def main():
     print(f" 專用設定檔：{profile}")
     print(f" 外掛資料夾：{ext if ext.exists() else '（未找到）'}")
     print(f" 瀏覽器　　：{chrome_exe or '（系統預設 Chrome）'}")
-    print(f" 目標網址　：{cfg['url']}")
+    print(f" 目標網址　：{url or '（未設定，請填 config.json 的 url）'}")
     print("=" * 60)
 
     uc_kwargs = dict(headless=False, user_data_dir=str(profile), browser_args=args)
@@ -246,8 +247,12 @@ async def main():
         uc_kwargs['browser_executable_path'] = chrome_exe
 
     browser = await uc.start(**uc_kwargs)
-    await browser.get(cfg['url'])
-    print(f"✅ 已開啟：{cfg['url']}")
+    if url:
+        await browser.get(url)
+        print(f"✅ 已開啟：{url}")
+    else:
+        await browser.get("about:blank")
+        print("ℹ config.json 的 url 為空，已開新分頁；請填入目標網址後重新啟動。")
 
     if cfg.get('open_extensions_page'):
         try:

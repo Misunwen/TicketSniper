@@ -104,7 +104,7 @@ function extLog(message) {
     });
     let fullMsg = `[${time}] ${message}`;
     console.info(
-        `%c🤖 搶票特工 %c ${fullMsg}`,
+        `%c🤖 TicketSniper %c ${fullMsg}`,
         'background: #00ff00; color: #000; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 12px;',
         'color: #00ff00; font-weight: bold; font-size: 12px; background: #222; padding: 2px 6px; border-radius: 4px;'
     );
