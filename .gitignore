@@ -1,6 +1,9 @@
 # 第三方參考專案（不納入本專案版控）
 tickets_hunter-main/
 
+# nodriver 專用 Chrome 設定檔（本機資料，不納入版控）
+launcher/chrome_profile/
+
 # Python
 __pycache__/
 *.py[cod]

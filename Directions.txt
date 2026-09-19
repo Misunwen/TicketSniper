@@ -21,8 +21,12 @@ TicketSniper/
 │  ├─ models/          自訓練 ONNX 模型（tixcraft_tm / universal）
 │  ├─ requirements.txt
 │  └─ recognition_log.dat     辨識紀錄（執行後產生）
-├─ 啟動伺服器.bat      一鍵啟動（會自動安裝套件）
-├─ 安裝套件.bat        只想先裝套件時使用
+├─ launcher/           nodriver 啟動器（可選）
+│  ├─ launcher.py      用 nodriver 開專用 Chrome 並導到活動頁
+│  └─ config.json      設定（網址／profile／是否載入外掛…）
+├─ 啟動伺服器.bat      一鍵啟動 OCR 伺服器（會自動安裝套件）
+├─ 啟動瀏覽器.bat      一鍵啟動 nodriver 瀏覽器（可選）
+├─ 安裝套件.bat        只想先裝伺服器套件時使用
 └─ 即時觀看紀錄.bat    即時看辨識紀錄
 
 ----------------------------------------
@@ -70,6 +74,22 @@ TicketSniper/
 - 輸入模式：逐字模擬（安全）或瞬間帶入（快）。
 - 驗證碼長度：拓元通常為 4。
 - 重試次數：辨識長度不符時最多換圖重試次數。
+
+----------------------------------------
+ 第四步（可選）：用 nodriver 啟動瀏覽器
+----------------------------------------
+不想手動開 Chrome 的話，可雙擊「啟動瀏覽器.bat」：
+- 它會用 nodriver 開一個「專用 Chrome 設定檔」(launcher/chrome_profile) 並導到
+  launcher/config.json 裡的網址；之後外掛就在這個乾淨的瀏覽器裡跑。
+- ⚠️ 重要：Chrome 137 版之後已移除命令列的「自動載入外掛」。
+  * 若你的瀏覽器是 Chromium 或舊版 Chrome：會自動載入外掛，不用設定。
+  * 若是新版 Chrome：第一次啟動時，請在跳出的 chrome://extensions 頁面
+    開啟「開發人員模式」→「載入未封裝項目」選 extension 資料夾。
+    只需做一次，之後會保存在這個專用設定檔，不用再載入。
+- config.json 可改：
+  * url：要開啟的活動網址。
+  * start_server：true 會順便一起啟動 OCR 伺服器。
+  * browser_executable_path：指定 Chrome/Chromium 執行檔（留空用預設）。
 
 ----------------------------------------
  操作小技巧

@@ -19,6 +19,9 @@
 - 擴充功能新增設定：排除關鍵字、選區順序、自動遞補、成功提示音。
 - 送出前就緒檢查（驗證碼長度／票數／同意）通過才自動送出。
 - 搶到票與送出成功時以 WebAudio 播放提示音。
+- 可選的 nodriver 啟動器（`launcher/` + `啟動瀏覽器.bat`）：開啟專用 Chrome
+  設定檔並導到活動頁；外掛載入一次即保存在該 profile。
+  （Chrome 137+ 已移除 `--load-extension`，新版需手動載入一次。）
 
 ### Changed
 - `server/requirements.txt` 固定 `ddddocr==1.5.6`（1.6+ 對自訓練模型解碼不相容）。

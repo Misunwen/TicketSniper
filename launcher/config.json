@@ -1,0 +1,11 @@
+{
+  "url": "https://tixcraft.com/",
+  "user_data_dir": "chrome_profile",
+  "browser_executable_path": "",
+  "window_size": [1280, 900],
+  "try_load_extension": true,
+  "extension_dir": "../extension",
+  "open_extensions_page": true,
+  "start_server": false,
+  "extra_args": []
+}
