@@ -76,20 +76,24 @@ TicketSniper/
 - 重試次數：辨識長度不符時最多換圖重試次數。
 
 ----------------------------------------
- 第四步（可選）：用 nodriver 啟動瀏覽器
+ 第四步（可選）：用 nodriver 啟動瀏覽器（全自動）
 ----------------------------------------
-不想手動開 Chrome 的話，可雙擊「啟動瀏覽器.bat」：
-- 它會用 nodriver 開一個「專用 Chrome 設定檔」(launcher/chrome_profile) 並導到
-  launcher/config.json 裡的網址；之後外掛就在這個乾淨的瀏覽器裡跑。
-- ⚠️ 重要：Chrome 137 版之後已移除命令列的「自動載入外掛」。
-  * 若你的瀏覽器是 Chromium 或舊版 Chrome：會自動載入外掛，不用設定。
-  * 若是新版 Chrome：第一次啟動時，請在跳出的 chrome://extensions 頁面
-    開啟「開發人員模式」→「載入未封裝項目」選 extension 資料夾。
-    只需做一次，之後會保存在這個專用設定檔，不用再載入。
-- config.json 可改：
+雙擊「啟動瀏覽器.bat」即可，它會自動完成：
+1. 檢查並安裝 OCR 伺服器套件，確認 ddddocr 版本為 1.5.6（自訓練模型需求）。
+2. 啟動 OCR 伺服器，並等到 /health 就緒。
+3. 自動下載並使用 Chrome for Testing（支援自動載入外掛，僅第一次下載）。
+4. 用 nodriver 開專用設定檔、自動載入 extension、導到活動網址。
+
+- 為何用 Chrome for Testing？Chrome 137+ 只在「品牌 Chrome」移除了
+  命令列自動載入外掛；Chrome for Testing / Chromium 仍支援，所以能全自動。
+- 若想改用系統原本的 Chrome：把 config.json 的 auto_download_chromium 設 false，
+  啟動器會加 --disable-features=DisableLoadExtensionCommandLineSwitch 嘗試還原；
+  若仍無效，請在設定檔手動載入一次外掛（開發人員模式 → 載入未封裝項目）。
+- 其他 config.json 選項：
   * url：要開啟的活動網址。
-  * start_server：true 會順便一起啟動 OCR 伺服器。
-  * browser_executable_path：指定 Chrome/Chromium 執行檔（留空用預設）。
+  * server_url：OCR 伺服器網址（預設 http://127.0.0.1:5000）。
+  * start_server：false 則不自動啟動伺服器。
+  * browser_executable_path：指定瀏覽器執行檔（留空則用 Chrome for Testing）。
 
 ----------------------------------------
  操作小技巧

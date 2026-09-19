@@ -2,18 +2,24 @@
 """
 TicketSniper nodriver 啟動器
 
-用 nodriver 開啟一個「專用 Chrome 設定檔」並導到活動頁；
-擴充功能若已載入此設定檔，就會沿用 TicketSniper 既有的自動點擊 + 驗證碼邏輯。
+一鍵流程：
+  1. 檢查/安裝 OCR 伺服器套件，並確認 ddddocr 版本為 1.5.6（自訓練模型需求）
+  2. 自動啟動 OCR 伺服器（Flask），並等它 /health 就緒
+  3. 自動取得 Chrome for Testing（支援自動載入外掛）或使用指定瀏覽器
+  4. 用 nodriver 開專用 profile，自動載入 extension 並導到活動頁
 
-注意：Chrome 137+ 已移除命令列的 --load-extension。
-- Chromium / 舊版 Chrome：可直接自動載入外掛（try_load_extension=true）。
-- 新版 Chrome：請在此設定檔手動載入一次（開發人員模式 → 載入未封裝項目），
-  之後會保存在這個專用 profile，不需再載入。
+Chrome 137+ 只在「品牌 Chrome」移除 --load-extension；Chrome for Testing / Chromium
+仍支援，所以預設會自動下載 Chrome for Testing 來達到全自動載入外掛。
+若改用品牌 Chrome，會加上 --disable-features=DisableLoadExtensionCommandLineSwitch 嘗試還原。
 """
 import asyncio
 import json
+import shutil
 import subprocess
 import sys
+import time
+import urllib.request
+import zipfile
 from pathlib import Path
 
 try:
@@ -23,16 +29,21 @@ except Exception:
     pass
 
 BASE = Path(__file__).resolve().parent
+REQUIRED_DDDDOCR = '1.5.6'
+CFT_JSON = "https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json"
 
 DEFAULTS = {
     "url": "https://tixcraft.com/",
     "user_data_dir": "chrome_profile",
     "browser_executable_path": "",
+    "auto_download_chromium": True,
+    "chromium_dir": "chrome-for-testing",
     "window_size": [1280, 900],
     "try_load_extension": True,
     "extension_dir": "../extension",
-    "open_extensions_page": True,
-    "start_server": False,
+    "open_extensions_page": False,
+    "start_server": True,
+    "server_url": "http://127.0.0.1:5000",
     "extra_args": []
 }
 
@@ -57,17 +68,121 @@ def resolve(p):
     return path if path.is_absolute() else (BASE / path).resolve()
 
 
-def start_server_if_needed(cfg):
-    if not cfg.get('start_server'):
+# =========================================================================
+# OCR 伺服器：版本檢查 + 自動啟動
+# =========================================================================
+def _ddddocr_version():
+    try:
+        from importlib.metadata import version
+        return version('ddddocr')
+    except Exception:
+        return None
+
+
+def ensure_server_deps():
+    need = False
+    try:
+        import flask  # noqa: F401
+    except Exception:
+        need = True
+    v = _ddddocr_version()
+    if v != REQUIRED_DDDDOCR:
+        need = True
+    if not need:
+        print(f"✅ 伺服器套件就緒（ddddocr {v}）")
+        return
+    print(f"ℹ 需安裝/更新伺服器套件（目前 ddddocr：{v or '未安裝'}）...")
+    req = (BASE / '..' / 'server' / 'requirements.txt').resolve()
+    try:
+        subprocess.run([sys.executable, '-m', 'pip', 'install', '-r', str(req), '-q'])
+    except Exception as e:
+        print(f"⚠ 安裝伺服器套件失敗：{e}")
+    v2 = _ddddocr_version()
+    if v2 == REQUIRED_DDDDOCR:
+        print(f"✅ ddddocr 已就緒：{v2}")
+    else:
+        print(f"⚠ ddddocr 版本為 {v2}，預期 {REQUIRED_DDDDOCR}；自訓練模型可能無法使用。")
+
+
+def is_server_up(url):
+    try:
+        with urllib.request.urlopen(url.rstrip('/') + '/health', timeout=2) as r:
+            return 200 <= r.status < 300
+    except Exception:
+        return False
+
+
+def start_server_and_wait(cfg):
+    url = (cfg.get('server_url') or 'http://127.0.0.1:5000')
+    if is_server_up(url):
+        print(f"ℹ OCR 伺服器已在執行：{url}")
+        return None
+    if not cfg.get('start_server', True):
+        print("ℹ 未自動啟動 OCR 伺服器（start_server=false）")
         return None
     server_py = (BASE / '..' / 'server' / 'app_en_tixcraft_V3.py').resolve()
     if not server_py.exists():
         print(f"⚠ 找不到伺服器程式：{server_py}")
         return None
-    print(f"▶ 同時啟動 OCR 伺服器：{server_py}")
-    return subprocess.Popen([sys.executable, str(server_py)], cwd=str(server_py.parent))
+
+    ensure_server_deps()
+    print(f"▶ 啟動 OCR 伺服器：{server_py}")
+    proc = subprocess.Popen([sys.executable, str(server_py)], cwd=str(server_py.parent))
+    deadline = time.time() + 40
+    while time.time() < deadline:
+        if is_server_up(url):
+            print(f"✅ OCR 伺服器就緒：{url}")
+            return proc
+        if proc.poll() is not None:
+            print("⚠ OCR 伺服器提早結束，請看上方錯誤訊息。")
+            return None
+        time.sleep(0.5)
+    print("⚠ 等待 OCR 伺服器逾時，仍繼續啟動瀏覽器（可稍後再試連線）。")
+    return proc
 
 
+# =========================================================================
+# 瀏覽器：自動下載 Chrome for Testing（支援 --load-extension）
+# =========================================================================
+def ensure_chrome_for_testing(cfg):
+    explicit = (cfg.get('browser_executable_path') or '').strip()
+    if explicit:
+        return explicit
+    if not cfg.get('auto_download_chromium', True):
+        return ''
+    dest = resolve(cfg.get('chromium_dir') or 'chrome-for-testing')
+    exe = dest / 'chrome-win64' / 'chrome.exe'
+    if exe.exists():
+        return str(exe)
+    try:
+        print("⬇ 下載 Chrome for Testing（支援自動載入外掛，僅第一次需要）...")
+        with urllib.request.urlopen(CFT_JSON, timeout=60) as r:
+            data = json.loads(r.read().decode('utf-8'))
+        downloads = data['channels']['Stable']['downloads']['chrome']
+        url = next(d['url'] for d in downloads if d['platform'] == 'win64')
+        dest.mkdir(parents=True, exist_ok=True)
+        zip_path = dest / 'chrome-win64.zip'
+        with urllib.request.urlopen(url, timeout=300) as r, open(zip_path, 'wb') as f:
+            shutil.copyfileobj(r, f)
+        print("解壓縮...")
+        with zipfile.ZipFile(zip_path) as z:
+            z.extractall(dest)
+        try:
+            zip_path.unlink()
+        except OSError:
+            pass
+        if exe.exists():
+            print(f"✅ Chrome for Testing：{exe}")
+            return str(exe)
+        print("⚠ 解壓縮後找不到 chrome.exe，改用預設瀏覽器。")
+    except Exception as e:
+        print(f"⚠ 取得 Chrome for Testing 失敗：{e}（改用預設瀏覽器）")
+    return ''
+
+
+# =========================================================================
+# 主流程
+# =========================================================================
 async def main():
     try:
         import nodriver as uc
@@ -80,29 +195,39 @@ async def main():
     ext = resolve(cfg['extension_dir'])
     profile.mkdir(parents=True, exist_ok=True)
 
+    # 1) OCR 伺服器
+    server_proc = start_server_and_wait(cfg)
+
+    # 2) 瀏覽器執行檔
+    chrome_exe = ensure_chrome_for_testing(cfg)
+    using_cft = bool(chrome_exe) and ('chrome-for-testing' in chrome_exe)
+
+    # 3) 參數
     args = []
     ws = cfg.get('window_size') or []
     if len(ws) == 2:
         args.append(f"--window-size={ws[0]},{ws[1]}")
     if cfg.get('try_load_extension') and ext.exists():
         args.append(f"--load-extension={ext}")
+        if not using_cft:
+            # 品牌 Chrome 137+ 的還原開關（Chrome for Testing 不需要）
+            args.append("--disable-features=DisableLoadExtensionCommandLineSwitch")
     elif cfg.get('try_load_extension'):
         print(f"⚠ 找不到外掛資料夾，略過自動載入：{ext}")
     args += list(cfg.get('extra_args') or [])
     args += ["--no-first-run", "--no-default-browser-check"]
 
-    server_proc = start_server_if_needed(cfg)
-
     print("=" * 60)
     print(" TicketSniper nodriver 啟動器")
     print(f" 專用設定檔：{profile}")
     print(f" 外掛資料夾：{ext if ext.exists() else '（未找到）'}")
+    print(f" 瀏覽器　　：{chrome_exe or '（系統預設 Chrome）'}")
     print(f" 目標網址　：{cfg['url']}")
     print("=" * 60)
 
     uc_kwargs = dict(headless=False, user_data_dir=str(profile), browser_args=args)
-    if cfg.get('browser_executable_path'):
-        uc_kwargs['browser_executable_path'] = cfg['browser_executable_path']
+    if chrome_exe:
+        uc_kwargs['browser_executable_path'] = chrome_exe
 
     browser = await uc.start(**uc_kwargs)
     await browser.get(cfg['url'])
@@ -111,10 +236,9 @@ async def main():
     if cfg.get('open_extensions_page'):
         try:
             await browser.get("chrome://extensions", new_tab=True)
-            print("ℹ 已開啟 chrome://extensions。若外掛未載入，請開『開發人員模式』→"
-                  "『載入未封裝項目』選 extension 資料夾（只需一次，會保存在此設定檔）。")
+            print("ℹ 已開啟 chrome://extensions（若外掛未載入，請手動載入一次）。")
         except Exception as e:
-            print(f"ℹ 請手動開啟 chrome://extensions 載入外掛（只需一次）。({e})")
+            print(f"ℹ 請手動開啟 chrome://extensions 載入外掛。({e})")
 
     print("瀏覽器保持開啟中；按 Ctrl+C 或關閉此視窗即可結束。")
     try:

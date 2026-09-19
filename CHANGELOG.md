@@ -19,9 +19,11 @@
 - 擴充功能新增設定：排除關鍵字、選區順序、自動遞補、成功提示音。
 - 送出前就緒檢查（驗證碼長度／票數／同意）通過才自動送出。
 - 搶到票與送出成功時以 WebAudio 播放提示音。
-- 可選的 nodriver 啟動器（`launcher/` + `啟動瀏覽器.bat`）：開啟專用 Chrome
-  設定檔並導到活動頁；外掛載入一次即保存在該 profile。
-  （Chrome 137+ 已移除 `--load-extension`，新版需手動載入一次。）
+- 可選的 nodriver 啟動器（`launcher/` + `啟動瀏覽器.bat`）：一鍵自動
+  1) 檢查/安裝伺服器套件並確認 `ddddocr==1.5.6`、2) 啟動 OCR 伺服器並等 `/health` 就緒、
+  3) 自動下載並使用 Chrome for Testing（支援 `--load-extension`，可全自動載入外掛）、
+  4) 開專用 profile 並導到活動頁。
+  品牌 Chrome 137+ 已移除 `--load-extension`，會以 `--disable-features=DisableLoadExtensionCommandLineSwitch` 嘗試還原。
 
 ### Changed
 - `server/requirements.txt` 固定 `ddddocr==1.5.6`（1.6+ 對自訓練模型解碼不相容）。
