@@ -40,13 +40,38 @@ def parse_requirements(path):
     return items
 
 
+_OPS = ('==', '>=', '<=', '!=', '>', '<')
+
+
+def _parse_version(v):
+    parts = re.split(r'[.\-+_]+', str(v))
+    out = []
+    for p in parts:
+        m = re.match(r'(\d+)', p)
+        out.append(int(m.group(1)) if m else 0)
+    return tuple(out)
+
+
 def is_satisfied(name, spec):
     try:
         v = version(name)
     except PackageNotFoundError:
         return False, None
-    if spec.startswith('=='):
-        return (v == spec[2:].strip()), v
+    spec = (spec or '').strip()
+    if not spec:
+        return True, v
+    for op in _OPS:
+        if spec.startswith(op):
+            want = spec[len(op):].strip()
+            cur, tgt = _parse_version(v), _parse_version(want)
+            n = max(len(cur), len(tgt))
+            cur = cur + (0,) * (n - len(cur))
+            tgt = tgt + (0,) * (n - len(tgt))
+            result = {
+                '==': cur == tgt, '>=': cur >= tgt, '<=': cur <= tgt,
+                '!=': cur != tgt, '>': cur > tgt, '<': cur < tgt,
+            }[op]
+            return result, v
     return True, v
 
 

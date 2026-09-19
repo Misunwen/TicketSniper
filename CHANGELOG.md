@@ -4,7 +4,7 @@
 格式參考 [Keep a Changelog](https://keepachangelog.com/zh-TW/1.1.0/)，
 版本號遵循 [Semantic Versioning](https://semver.org/lang/zh-TW/)。
 
-## [Unreleased]
+## [1.2] - 2026-09-19
 
 ### Added
 - `tools/setup_deps.py`，並重寫 `安裝套件.bat`：逐一檢測伺服器／啟動器所需套件，
@@ -17,6 +17,24 @@
 ### Changed
 - 啟動器 `.bat` 改為 UTF-8 + `chcp 65001`，中文與 emoji 訊息可正常顯示。
 - OCR 伺服器綁定改為 `127.0.0.1`（僅限本機存取）。
+- 反偵測改為在 MAIN world（`extension/anti_detection.js`）執行，才真正影響頁面；
+  content script 僅保留原生 `isTrusted` getter 供判斷真人點擊。
+- `/recognize` 加上 CORS 來源允許清單，僅接受目標平台與擴充功能來源。
+- ddddocr 推論改為序列化（執行緒鎖），避免 `threaded=True` 併發競態。
+- `extension/inject.js`／`inject.min.js` 二選一，移除未使用的重複檔（改用 `inject.js`）。
+
+### Fixed
+- 伺服器在自訓練模型回傳長度不符且多策略無結果時，不再回 HTTP 500，
+  改回傳模型輸出（`length_mismatch`）或 200 `success:false`，讓前端能換圖重試。
+- 擴充功能辨識失敗、伺服器非 2xx、長度不符或 hash 驗證失敗時，改為「點擊換圖後重試」，
+  不再對同一張圖重複請求。
+- IBON 區域關鍵字改用共用解析（支援 `;`／`,` 備案分組），與 tixcraft／KKTIX 一致。
+- 售完判斷改以完整 class token 比對，避免 `full-width` 等誤判。
+- `isSubmitReady` 的驗證碼長度改用設定值，不再寫死 4。
+- 不再改寫頁面驗證碼 `<img>` 的 `src`（避免破壞網站換圖／hash 流程）；
+  泛用 `data:image` 選擇器移到最後，降低誤選。
+- `setup_deps.py` 支援 `>=`／`<=`／`>`／`<`／`!=` 版本運算子。
+- popup 版本號改由 manifest 動態取得；background 訊息繁體化並加上錯誤處理。
 
 ## [1.1] - 2026-09-19
 

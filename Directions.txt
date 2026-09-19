@@ -14,7 +14,7 @@ TicketSniper/
 │  ├─ content.js       自動點擊 + 驗證碼辨識主邏輯
 │  ├─ background.js    讀取 / 觸發 Yii2 驗證碼 hash
 │  ├─ popup.html/js    設定面板
-│  └─ inject.min.js    頁面橋接腳本
+│  └─ inject.js        頁面橋接腳本
 ├─ server/             OCR 伺服器（大腦）
 │  ├─ Flask 辨識主程式
 │  ├─ models/          自訓練 ONNX 模型

@@ -1,7 +1,8 @@
 {
   "manifest_version": 3,
   "name": "TicketSniper",
-  "version": "1.1",
+  "version": "1.2",
+  "minimum_chrome_version": "111",
   "description": "Chrome 擴充功能 + 地端 ddddocr 驗證碼辨識（網頁表單自動化）",
   "icons": {
     "16": "icon.png",
@@ -42,11 +43,22 @@
       ],
       "js": ["content.js"],
       "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "*://*.tixcraft.com/*",
+        "*://*.kktix.cc/*",
+        "*://*.kktix.com/*",
+        "*://*.ibon.com.tw/*"
+      ],
+      "js": ["anti_detection.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
     }
   ],
   "web_accessible_resources": [
     {
-      "resources": ["inject.min.js", "icon.png"],
+      "resources": ["inject.js", "icon.png"],
       "matches": [
         "*://*.tixcraft.com/*",
         "*://*.kktix.cc/*",

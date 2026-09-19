@@ -98,7 +98,19 @@ MIN_CONSENSUS_STRATEGIES = 5   # 至少幾個策略同意才可提前結束
 CONSENSUS_SHARE = 0.6          # 冠軍得票占總票數比例門檻
 
 app = Flask(__name__)
-CORS(app)
+
+# CORS：/health 供擴充功能檢查（開放）；/recognize 僅允許目標平台與擴充功能來源讀取
+CORS(app, resources={
+    r"/health": {"origins": "*"},
+    r"/recognize": {
+        "origins": [
+            r"https://([a-z0-9-]+\.)*tixcraft\.com$",
+            r"chrome-extension://.*",
+            "http://localhost:5000",
+            "http://127.0.0.1:5000",
+        ]
+    }
+})
 
 # ==========================================
 # 🤖 OCR 模型初始化
@@ -107,6 +119,8 @@ ocr = ddddocr.DdddOcr(show_ad=False)
 ocr.set_ranges("abcdefghijklmnopqrstuvwxyz")
 
 _ocr_supports_confidence = True
+# ddddocr / onnxruntime 推論非保證執行緒安全：序列化所有推論呼叫（Flask threaded=True）
+_ocr_infer_lock = threading.Lock()
 
 try:
     from importlib.metadata import version as _pkg_version
@@ -123,7 +137,8 @@ def ocr_classify(img_bytes):
     global _ocr_supports_confidence
     if _ocr_supports_confidence:
         try:
-            res = ocr.classification(img_bytes, probability=True)
+            with _ocr_infer_lock:
+                res = ocr.classification(img_bytes, probability=True)
             if isinstance(res, dict):
                 text = res.get('text') or ''
                 conf = res.get('confidence', 1.0)
@@ -137,7 +152,8 @@ def ocr_classify(img_bytes):
         except Exception:
             return '', 0.0
     try:
-        return ocr.classification(img_bytes), 1.0
+        with _ocr_infer_lock:
+            return ocr.classification(img_bytes), 1.0
     except Exception:
         return '', 0.0
 
@@ -209,7 +225,8 @@ def get_custom_ocr(model_key):
 def custom_ocr_classify(ocr_obj, img_bytes, model_name):
     """自訓練模型辨識（直接吃原始圖片 bytes，無需前處理）。"""
     try:
-        res = ocr_obj.classification(img_bytes)
+        with _ocr_infer_lock:
+            res = ocr_obj.classification(img_bytes)
         if isinstance(res, dict):
             text = res.get('text') or ''
             conf = res.get('confidence', 1.0)
@@ -932,6 +949,7 @@ def recognize_core(original_rgb, base_img, expected_length,
                    current_round=1, recognize_times_total=1,
                    custom_ocr=None, raw_bytes=None, custom_model_name=None):
     # ① 自訓練模型優先（raw bytes，無需前處理）
+    custom_fallback = None
     if custom_ocr is not None and raw_bytes is not None:
         try:
             text, conf = custom_ocr_classify(custom_ocr, raw_bytes, custom_model_name or '')
@@ -949,13 +967,15 @@ def recognize_core(original_rgb, base_img, expected_length,
                         'winner_votes': round(conf, 2),
                         'version': APP_VERSION,
                     }
+                # 長度不符：先試多策略投票，若也無結果則回傳模型輸出（讓前端換圖重試）
+                custom_fallback = (text, conf)
                 print(f"   ↳ 長度不符（期望 {expected_length}），改用多策略投票")
         except Exception as e:
             print(f"⚠ 自訓練模型流程失敗: {e}")
 
     strategies = build_strategies(expected_length)
     print(f"\n{'='*60}")
-    print(f"🚀 Captcha Sniper V{APP_VERSION} | 預期長度：{expected_length} | 策略數：{len(strategies)}")
+    print(f"🚀 TicketSniper OCR V{APP_VERSION} | 預期長度：{expected_length} | 策略數：{len(strategies)}")
     print(f"{'='*60}")
 
     results = []
@@ -998,6 +1018,22 @@ def recognize_core(original_rgb, base_img, expected_length,
 
     final_text = pos_text or best_text
     if not final_text:
+        # 多策略全失敗：回退自訓練模型輸出（長度不符也回），讓前端能換圖重試
+        if custom_fallback:
+            text, conf = custom_fallback
+            print(f"↩ 多策略無結果，回傳自訓練模型輸出：'{text}'")
+            return {
+                'success': True,
+                'text': text,
+                'method': 'custom',
+                'votes': {text: round(conf, 2)},
+                'top3': [[text, round(conf, 2)]],
+                'strategies': f"[{custom_model_name}]={text}",
+                'total_strategies': 1,
+                'winner_votes': round(conf, 2),
+                'length_mismatch': True,
+                'version': APP_VERSION,
+            }
         return None
 
     vote_info = sorted(vote_map.items(), key=lambda x: x[1], reverse=True)
@@ -1092,7 +1128,8 @@ def recognize_captcha():
                     custom_model_name=custom_model_name
                 )
                 if payload is None:
-                    return jsonify({'success': False, 'error': '所有策略均失敗'}), 500
+                    print("⚠ 所有策略均失敗（未快取，回 200 讓前端換圖重試）")
+                    return jsonify({'success': False, 'error': '所有策略均失敗'}), 200
 
                 # Yii2 hash 校正：只修「單一字元」的 OCR 錯誤
                 if yii_hash:
@@ -1125,7 +1162,7 @@ def recognize_captcha():
 # ==========================================
 if __name__ == '__main__':
     print("="*60)
-    print("🚀 Captcha Sniper V5.0 - 強化版")
-    print("  AAAAAAAAAAAAAAAAAAAAAAA  ")
+    print(f"🚀 TicketSniper OCR Server V{APP_VERSION}")
+    print("   驗證碼辨識伺服器（僅本機 127.0.0.1:5000）")
     print("="*60)
     app.run(host='127.0.0.1', port=5000, debug=False, threaded=True)

@@ -25,6 +25,9 @@ function getYiiHashFromTab(tabId, allowRefresh = true, timeoutMs = 2500) {
 document.addEventListener('DOMContentLoaded', () => {
     const $ = id => document.getElementById(id);
 
+    const verEl = $('appVersion');
+    if (verEl) verEl.textContent = chrome.runtime.getManifest().version;
+
     const autoCheck        = $('autoCheck');
     const autoReload       = $('autoReload');
     const dropdownValue    = $('dropdownValue');

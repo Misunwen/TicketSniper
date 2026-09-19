@@ -1,13 +1,13 @@
 // =========================================================================
-// 🔺 第一行就執行：inject.min.js 注入（必須在任何邏輯之前）
+// 🔺 第一行就執行：inject.js 注入（必須在任何邏輯之前）
 // =========================================================================
 function injectScript() {
     try {
         let s = document.createElement('script');
-        s.src = chrome.runtime.getURL('inject.min.js');
+        s.src = chrome.runtime.getURL('inject.js');
         s.onload = function() { this.remove(); };
         (document.head || document.documentElement).appendChild(s);
-        console.info('✅ inject.min.js 注入成功');
+        console.info('✅ inject.js 注入成功');
     } catch(e) {
         console.error('inject 失敗:', e);
     }
@@ -116,16 +116,12 @@ function extLog(message) {
 }
 
 // ⓪ 反偵測注入（extLog 定義後才執行）
-(function injectAntiDetection() {
+// 注意：真正的反偵測（覆寫頁面 Event.prototype.isTrusted）必須在 MAIN world 執行，
+// 已由 manifest 的 anti_detection.js（world: MAIN）負責。content script 位於
+// ISOLATED world，無法影響頁面；此處僅保留「原生 isTrusted getter」供辨識真人點擊。
+(function captureNativeIsTrusted() {
     try {
-        const _orig = EventTarget.prototype.addEventListener;
-        const _origRemove = EventTarget.prototype.removeEventListener;
-
-        // 保留原生 isTrusted 判斷（驗證碼模組需要分辨真人點擊）
-        let _nativeIsTrustedGet = null;
-        try {
-            _nativeIsTrustedGet = Object.getOwnPropertyDescriptor(Event.prototype, 'isTrusted').get;
-        } catch(_) {}
+        const _nativeIsTrustedGet = Object.getOwnPropertyDescriptor(Event.prototype, 'isTrusted').get;
         window.__nativeIsTrusted = function(e) {
             try {
                 return _nativeIsTrustedGet ? _nativeIsTrustedGet.call(e) : !!e.isTrusted;
@@ -133,50 +129,10 @@ function extLog(message) {
                 return false;
             }
         };
-        
-        function makeNativeLike(fn, name) {
-            Object.defineProperty(fn, 'name', { value: name, configurable: true });
-            fn.toString = function() {
-                return `function ${name}() { [native code] }`;
-            };
-            fn.toString.toString = function() {
-                return 'function toString() { [native code] }';
-            };
-            return fn;
-        }
-        
-        Object.defineProperty(Event.prototype, 'isTrusted', {
-            get: function() { return true; },
-            configurable: true,
-            enumerable: true
-        });
-        
-        const wrappedAddEventListener = function(type, fn, opts) {
-            if (typeof fn !== 'function') return _orig.call(this, type, fn, opts);
-            function wrapped(e) {
-                try {
-                    Object.defineProperty(e, 'isTrusted', {
-                        get: () => true,
-                        configurable: true
-                    });
-                } catch(_) {}
-                return fn.call(this, e);
-            }
-            fn._wrapped = wrapped;
-            return _orig.call(this, type, wrapped, opts);
-        };
-        makeNativeLike(wrappedAddEventListener, 'addEventListener');
-        EventTarget.prototype.addEventListener = wrappedAddEventListener;
-        
-        const wrappedRemoveEventListener = function(type, fn, opts) {
-            return _origRemove.call(this, type, fn?._wrapped || fn, opts);
-        };
-        makeNativeLike(wrappedRemoveEventListener, 'removeEventListener');
-        EventTarget.prototype.removeEventListener = wrappedRemoveEventListener;
-        
-        extLog('✅ 反偵測注入成功');
     } catch(e) {
-        extLog('⚠️ 反偵測注入失敗: ' + e.message);
+        window.__nativeIsTrusted = function(e) {
+            try { return !!e.isTrusted; } catch(_) { return false; }
+        };
     }
 })();
 
@@ -395,6 +351,17 @@ function isUnavailableText(text) {
     if (SOLD_OUT_KEYWORDS.some(k => t.includes(normalizeText(k)))) return true;
     if (NOT_OPEN_KEYWORDS.some(k => t.includes(normalizeText(k)))) return true;
     return false;
+}
+
+// 以「完整 class token」判斷，避免 full-width / disabled-x 之類的誤判
+function hasUnavailableClass(el) {
+    if (!el || !el.className) return false;
+    let raw = typeof el.className === 'string' ? el.className : '';
+    if (!raw) return false;
+    return raw.toLowerCase().split(/\s+/).some(t =>
+        t === 'disabled' || t === 'full' || t === 'unavailable' ||
+        (t.includes('sold') && t.includes('out'))
+    );
 }
 
 function selectIndexByMode(len, mode) {
@@ -883,10 +850,7 @@ async function runIBON(settings) {
         return;
     }
 
-    let keywords = zoneKeywords
-        .split(/,|，/)
-        .map(k => k.trim())
-        .filter(Boolean);
+    let keywords = parseKeywordGroups(zoneKeywords);
 
     let keywordInfo = analyzeKeywordType(keywords);
     
@@ -1352,23 +1316,10 @@ function runTixCraft(settings) {
         if (parent) {
             let parentText = normalizeText(parent.innerText);
             if (isUnavailableText(parentText)) return true;
-            let parentClass = normalizeText(parent.className || '');
-            if (parentClass.includes('soldout') || parentClass.includes('disabled') || parentClass.includes('full')) return true;
+            if (hasUnavailableClass(parent)) return true;
         }
-        let cls = normalizeText(el.className || '');
-        if (cls.includes('soldout') || cls.includes('disabled') || cls.includes('full')) return true;
+        if (hasUnavailableClass(el)) return true;
         return false;
-    }
-    
-    function matchKeywordNormalized(normalizedText, kw) {
-        let nkw = normalizeText(kw);
-        if (!nkw) return false;
-        if (nkw.endsWith('區') || nkw.endsWith('区')) {
-            return normalizedText.includes(nkw);
-        }
-        return normalizedText.includes(nkw + '區') ||
-               normalizedText.includes(nkw + '区') ||
-               normalizedText.includes(nkw);
     }
     
     async function loop() {
@@ -1539,17 +1490,6 @@ function runKKTIX(settings) {
     let isStopped = false;
     let isWaitingLogShown = false;
     let localIsClicking = false;
-    
-    function matchKeywordNormalized(normalizedText, kw) {
-        let nkw = normalizeText(kw);
-        if (!nkw) return false;
-        if (nkw.endsWith('區') || nkw.endsWith('区')) {
-            return normalizedText.includes(nkw);
-        }
-        return normalizedText.includes(nkw + '區') ||
-               normalizedText.includes(nkw + '区') ||
-               normalizedText.includes(nkw);
-    }
     
     function extractPrice(ticketUnit) {
         if (!ticketUnit) return 0;
@@ -1772,18 +1712,20 @@ if (typeof chrome !== 'undefined' && chrome.storage) {
 // =========================================================================
 const CAPTCHA_IMG_SELECTORS = [
     '#yw0', '#vadimg', '#ValidCode', '#imgCaptcha', '#captcha_image',
-    'img[src^="data:image"]',
     'img[alt*="驗證碼"]', 'img[alt*="验证码" i]', 'img[alt*="captcha" i]',
     'img[src*="VaildImage" i]', 'img[src*="captcha" i]', 'img[src*="Verify" i]',
     'img[src*="Validate" i]', 'img[src*="Code.aspx" i]', 'img[src*="CreateCode" i]',
     'img[alt*="驗證" i]', 'img[src*="Code" i]',
     'img[class*="captcha" i]', 'img[class*="code" i]', 'img[id*="captcha" i]',
-    '.captcha img', '.captcha-img', '#captcha'
+    '.captcha img', '.captcha-img', '#captcha',
+    // 泛用 data:image 放最後，避免誤選頁面上的非驗證碼圖片
+    'img[src^="data:image"]'
 ];
 
 const CAPTCHA_MAX_RETRIES = 3;
 let detectedCaptchaImg = null;
 let captchaExecuting = false;
+let _captchaLengthHint = 4;   // 供 isSubmitReady 使用（由辨識時實際設定帶入）
 
 function isCaptchaImageElement(el) {
     if (!el || el.tagName.toLowerCase() !== 'img') return false;
@@ -1919,10 +1861,9 @@ function getCaptchaImageRaw() {
 }
 
 function convertImageToBase64(captchaImg, callback) {
-    if (captchaImg.src !== captchaImg.dataset.lastGeneratedSrc) {
-        captchaImg.dataset.originalSrc = captchaImg.src;
-    }
-    const imgSrc = captchaImg.dataset.originalSrc;
+    // 只讀取目前 src，不改動頁面上的 <img>（避免破壞網站自己的換圖/hash 流程）
+    const imgSrc = captchaImg.currentSrc || captchaImg.getAttribute('src') || captchaImg.src || '';
+    if (!imgSrc) { callback(null); return; }
     const isBase64 = imgSrc.startsWith('data:image');
 
     const img = new Image();
@@ -1937,10 +1878,7 @@ function convertImageToBase64(captchaImg, callback) {
             ctx.fillStyle = '#FFFFFF';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
             ctx.drawImage(img, 0, 0);
-            const base64Data = canvas.toDataURL('image/png');
-            captchaImg.src = base64Data;
-            captchaImg.dataset.lastGeneratedSrc = base64Data;
-            callback(base64Data);
+            callback(canvas.toDataURL('image/png'));
         } catch (e) {
             console.warn('[TicketSniper] canvas 轉換失敗:', e);
             callback(null);
@@ -2078,8 +2016,9 @@ function clickSubmitButton() {
 
 // 送出前就緒檢查（參考 tickets_hunter：驗證碼/票數/同意皆就緒才送出）
 function isSubmitReady() {
+    let need = _captchaLengthHint > 0 ? _captchaLengthHint : 4;
     let cap = document.querySelector('#TicketForm_verifyCode');
-    if (cap && cap.offsetParent !== null && (cap.value || '').length < 4) return false;
+    if (cap && cap.offsetParent !== null && (cap.value || '').length < need) return false;
     let agree = document.querySelector('#TicketForm_agree, #agree');
     if (agree && !agree.checked) return false;
     let qtySelects = Array.from(document.querySelectorAll('select')).filter(isQuantitySelect);
@@ -2105,6 +2044,27 @@ async function maybeAutoSubmit() {
 // =========================================================================
 // 核心：辨識一次（Promise 版）
 // =========================================================================
+// 點擊驗證碼圖片換一張新圖，並清掉快取的圖片參照
+async function refreshCaptchaImage(waitMs = 1500) {
+    const img = (detectedCaptchaImg && document.body.contains(detectedCaptchaImg))
+        ? detectedCaptchaImg
+        : findCaptchaImage();
+    if (img) {
+        try { img.click(); } catch (e) {}
+    }
+    detectedCaptchaImg = null;
+    await sleep(waitMs);
+}
+
+// 強制重跑：若目前正在辨識，先等它結束，避免兩個辨識流程重疊
+async function forceSolveCaptcha(allowSubmit) {
+    let guard = 0;
+    while (captchaExecuting && guard++ < 100) {
+        await sleep(100);
+    }
+    return solveCaptchaOnce(true, allowSubmit);
+}
+
 async function solveCaptchaOnce(forceRun = false, allowSubmit = false, doFill = true) {
     if (captchaExecuting) return null;
     const data = await storageGet(['autoRun', 'serverUrl', 'savedSelector', 'typingMode', 'captchaLength', 'recognizeTimes', 'yiiHashEnabled']);
@@ -2114,6 +2074,7 @@ async function solveCaptchaOnce(forceRun = false, allowSubmit = false, doFill = 
     try {
         const typingMode = data.typingMode || 'simulate';
         const expectedLength = data.captchaLength ? parseInt(data.captchaLength) : null;
+        if (expectedLength && !isNaN(expectedLength)) _captchaLengthHint = expectedLength;
 
         let bypassAnswer = checkAudioCaptchaBypass();
         if (bypassAnswer) {
@@ -2133,7 +2094,9 @@ async function solveCaptchaOnce(forceRun = false, allowSubmit = false, doFill = 
                 extLog('❌ 找不到驗證碼圖片');
                 return null;
             }
+
             let resData = null;
+            let serverFailed = false;
             try {
                 const res = await fetch(apiUrl, {
                     method: 'POST',
@@ -2148,27 +2111,30 @@ async function solveCaptchaOnce(forceRun = false, allowSubmit = false, doFill = 
                         retryCount: attempt
                     })
                 });
-                resData = await res.json();
+                if (!res.ok) {
+                    serverFailed = true;
+                    extLog(`⚠️ 辨識伺服器回應 ${res.status}`);
+                }
+                resData = await res.json().catch(() => null);
             } catch (err) {
                 extLog(`❌ 驗證碼伺服器錯誤：${err.message}`);
                 return null;
             }
 
             const text = resData && (resData.text || resData.result);
-            if (!text) continue;
+            const lengthBad = expectedLength && text && text.length < expectedLength;
+            const mismatch = resData && resData.length_mismatch === true;
+            const hashBad = resData && resData.hash_used && resData.hash_verified === false;
 
-            const lengthBad = expectedLength && text.length < expectedLength;
-            const hashBad = resData.hash_used && resData.hash_verified === false;
-            if (lengthBad || hashBad) {
-                extLog(lengthBad
-                    ? `⚠️ 辨識長度不足 (${text.length}<${expectedLength})，換圖重試...`
-                    : '⚠️ hash 驗證失敗，換圖重試...');
+            if (!text || serverFailed || lengthBad || mismatch || hashBad) {
+                let why = '辨識失敗';
+                if (serverFailed) why = '伺服器錯誤';
+                else if (lengthBad) why = `長度不足 (${text.length}<${expectedLength})`;
+                else if (mismatch) why = '長度不符';
+                else if (hashBad) why = 'hash 驗證失敗';
+                extLog(`⚠️ ${why}，換圖重試...`);
                 if (attempt < CAPTCHA_MAX_RETRIES) {
-                    const img = (detectedCaptchaImg && document.body.contains(detectedCaptchaImg))
-                        ? detectedCaptchaImg
-                        : findCaptchaImage();
-                    if (img) img.click();
-                    await sleep(1500);
+                    await refreshCaptchaImage(1500);
                     continue;
                 }
                 return null;
@@ -2285,7 +2251,6 @@ document.addEventListener('click', (e) => {
     chrome.storage.local.get(['autoRun'], (data) => {
         if (!data.autoRun) return;
         extLog('🖱️ 手動點擊驗證碼，等待新圖後重新辨識...');
-        captchaExecuting = false;
         const oldImg = detectedCaptchaImg;
         const oldSrc = oldImg ? (oldImg.getAttribute('src') || '') : '';
         let waited = 0;
@@ -2295,7 +2260,7 @@ document.addEventListener('click', (e) => {
             const curSrc = cur ? (cur.getAttribute('src') || '') : '';
             if ((curSrc && curSrc !== oldSrc) || waited >= 1500) {
                 clearInterval(iv);
-                whenImageReady(cur, () => solveCaptchaOnce(true, true));
+                whenImageReady(cur, () => forceSolveCaptcha(true));
             }
         }, 60);
     });
@@ -2307,7 +2272,6 @@ document.addEventListener('keydown', (e) => {
         if (!isCaptchaPlatform()) return;
         e.preventDefault();
         extLog('⌨️ F4 強制重新辨識驗證碼');
-        captchaExecuting = false;
-        solveCaptchaOnce(true, false);
+        forceSolveCaptcha(false);
     }
 });
