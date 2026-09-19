@@ -32,7 +32,22 @@ else:
             ('common_det.onnx', 'ddddocr/common_det.onnx'),
         ]
 
-print(f"總共打包 {len(datas)} 個 ONNX 模型")
+print(f"總共打包 {len(datas)} 個官方 ddddocr 模型")
+
+# ==================== 本專案自訓練模型（server/models） ====================
+try:
+    spec_dir = Path(SPECPATH)  # PyInstaller 提供
+except NameError:
+    spec_dir = Path(os.path.dirname(os.path.abspath(__file__)))
+project_models = spec_dir / 'models'
+if project_models.exists():
+    for model_file in project_models.rglob('*'):
+        if model_file.is_file():
+            rel = model_file.relative_to(project_models)
+            datas.append((str(model_file), str(Path('models') / rel.parent)))
+            print(f"✓ 加入自訓練模型: {rel}")
+else:
+    print("⚠ 找不到 server/models，打包後將沒有自訓練模型（會回退多策略投票）")
 
 a = Analysis(
     ['app_en_tixcraft_V3.py'],
@@ -40,11 +55,9 @@ a = Analysis(
     binaries=[],
     datas=datas,
     hiddenimports=[
+        # ddddocr 1.5.6 為單檔架構，僅需 'ddddocr'
         'ddddocr',
-        'ddddocr.model',
-        'ddddocr.compat.v1',
-        'ddddocr.core.ocr_engine',
-        'ddddocr.models.model_loader',
+        'cv2',
         'onnxruntime',
         'onnxruntime.capi',
         'onnxruntime.capi.onnxruntime_pybind11_state',
@@ -79,7 +92,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name='Tixcraft_Captcha_Sniper_V45',
+    name='TicketSniper_Server',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

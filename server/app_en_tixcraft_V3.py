@@ -108,6 +108,12 @@ ocr.set_ranges("abcdefghijklmnopqrstuvwxyz")
 
 _ocr_supports_confidence = True
 
+try:
+    from importlib.metadata import version as _pkg_version
+    print(f"ℹ ddddocr 版本：{_pkg_version('ddddocr')}（自訓練模型需 1.5.6；1.6+ 不相容）")
+except Exception:
+    pass
+
 
 def ocr_classify(img_bytes):
     """
