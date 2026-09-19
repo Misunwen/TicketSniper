@@ -14,6 +14,7 @@ Chrome 137+ 只在「品牌 Chrome」移除 --load-extension；Chrome for Testin
 """
 import asyncio
 import json
+import platform
 import shutil
 import subprocess
 import sys
@@ -144,25 +145,41 @@ def start_server_and_wait(cfg):
 # =========================================================================
 # 瀏覽器：自動下載 Chrome for Testing（支援 --load-extension）
 # =========================================================================
+def _cft_platform():
+    """回傳 (Chrome for Testing 平台鍵, 解壓資料夾, 執行檔相對路徑)。"""
+    if sys.platform.startswith('win'):
+        if sys.maxsize > 2**32:
+            return ('win64', 'chrome-win64', 'chrome.exe')
+        return ('win32', 'chrome-win32', 'chrome.exe')
+    if sys.platform == 'darwin':
+        mac_exe = 'Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing'
+        if platform.machine().lower() in ('arm64', 'aarch64'):
+            return ('mac-arm64', 'chrome-mac-arm64', mac_exe)
+        return ('mac-x64', 'chrome-mac-x64', mac_exe)
+    return ('linux64', 'chrome-linux64', 'chrome')
+
+
 def ensure_chrome_for_testing(cfg):
+    """取得瀏覽器執行檔，回傳 (路徑, 是否為 Chrome for Testing)。"""
     explicit = (cfg.get('browser_executable_path') or '').strip()
     if explicit:
-        return explicit
+        return explicit, False
     if not cfg.get('auto_download_chromium', True):
-        return ''
-    dest = resolve(cfg.get('chromium_dir') or 'chrome-for-testing')
-    exe = dest / 'chrome-win64' / 'chrome.exe'
+        return '', False
+    plat, folder, rel_exe = _cft_platform()
+    dest = resolve(cfg.get('chromium_dir') or '../chrome-for-testing')
+    exe = dest / folder / rel_exe
     if exe.exists():
-        return str(exe)
+        return str(exe), True
     try:
-        print("⬇ 下載 Chrome for Testing（支援自動載入外掛，僅第一次需要）...")
+        print(f"⬇ 下載 Chrome for Testing（{plat}，支援自動載入外掛，僅第一次需要）...")
         with urllib.request.urlopen(CFT_JSON, timeout=60) as r:
             data = json.loads(r.read().decode('utf-8'))
         downloads = data['channels']['Stable']['downloads']['chrome']
-        url = next(d['url'] for d in downloads if d['platform'] == 'win64')
+        url = next(d['url'] for d in downloads if d['platform'] == plat)
         dest.mkdir(parents=True, exist_ok=True)
-        zip_path = dest / 'chrome-win64.zip'
-        with urllib.request.urlopen(url, timeout=300) as r, open(zip_path, 'wb') as f:
+        zip_path = dest / f'{folder}.zip'
+        with urllib.request.urlopen(url, timeout=600) as r, open(zip_path, 'wb') as f:
             shutil.copyfileobj(r, f)
         print("解壓縮...")
         with zipfile.ZipFile(zip_path) as z:
@@ -173,11 +190,11 @@ def ensure_chrome_for_testing(cfg):
             pass
         if exe.exists():
             print(f"✅ Chrome for Testing：{exe}")
-            return str(exe)
-        print("⚠ 解壓縮後找不到 chrome.exe，改用預設瀏覽器。")
+            return str(exe), True
+        print("⚠ 解壓縮後找不到執行檔，改用預設瀏覽器。")
     except Exception as e:
         print(f"⚠ 取得 Chrome for Testing 失敗：{e}（改用預設瀏覽器）")
-    return ''
+    return '', False
 
 
 # =========================================================================
@@ -199,8 +216,7 @@ async def main():
     server_proc = start_server_and_wait(cfg)
 
     # 2) 瀏覽器執行檔
-    chrome_exe = ensure_chrome_for_testing(cfg)
-    using_cft = bool(chrome_exe) and ('chrome-for-testing' in chrome_exe)
+    chrome_exe, using_cft = ensure_chrome_for_testing(cfg)
 
     # 3) 參數
     args = []

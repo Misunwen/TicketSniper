@@ -1128,4 +1128,4 @@ if __name__ == '__main__':
     print("🚀 Captcha Sniper V5.0 - 強化版")
     print("  AAAAAAAAAAAAAAAAAAAAAAA  ")
     print("="*60)
-    app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)
+    app.run(host='127.0.0.1', port=5000, debug=False, threaded=True)
