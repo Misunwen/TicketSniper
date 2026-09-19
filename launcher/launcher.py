@@ -37,7 +37,7 @@ DEFAULTS = {
     "user_data_dir": "chrome_profile",
     "browser_executable_path": "",
     "auto_download_chromium": True,
-    "chromium_dir": "chrome-for-testing",
+    "chromium_dir": "../chrome-for-testing",
     "window_size": [1280, 900],
     "try_load_extension": True,
     "extension_dir": "../extension",

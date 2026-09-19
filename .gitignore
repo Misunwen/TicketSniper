@@ -3,7 +3,7 @@ tickets_hunter-main/
 
 # nodriver 專用 Chrome 設定檔與自動下載的瀏覽器（本機資料，不納入版控）
 launcher/chrome_profile/
-launcher/chrome-for-testing/
+chrome-for-testing/
 
 # Python
 __pycache__/
