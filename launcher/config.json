@@ -10,5 +10,9 @@
   "open_extensions_page": false,
   "start_server": true,
   "server_url": "http://127.0.0.1:5000",
+  "trusted_click": true,
+  "control_port": 5100,
+  "block_trackers": false,
+  "save_log": true,
   "extra_args": []
 }

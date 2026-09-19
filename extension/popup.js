@@ -36,6 +36,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const keywordExclude   = $('keywordExclude');
     const areaSelectMode   = $('areaSelectMode');
     const areaAutoFallback = $('areaAutoFallback');
+    const kktixSeatMode    = $('kktixSeatMode');
     const playSound        = $('playSound');
 
     const serverStatus     = $('serverStatus');
@@ -55,15 +56,17 @@ document.addEventListener('DOMContentLoaded', () => {
     const selectBtn        = $('selectBtn');
     const recognizeBtn     = $('recognizeBtn');
     const clearBtn         = $('clearBtn');
+    const debugLog         = $('debugLog');
+    const exportLogBtn     = $('exportLogBtn');
 
     // =========================================
     // 載入設定
     // =========================================
     chrome.storage.local.get([
         'autoCheck', 'autoReload', 'dropdownValue', 'autoClickZone', 'zoneKeywords', 'autoSubmit',
-        'keywordExclude', 'areaSelectMode', 'areaAutoFallback', 'playSound',
+        'keywordExclude', 'areaSelectMode', 'areaAutoFallback', 'playSound', 'kktixSeatMode',
         'autoFill', 'autoRun', 'yiiHashEnabled', 'serverUrl', 'typingMode', 'captchaLength', 'recognizeTimes',
-        'savedSelector'
+        'savedSelector', 'debugLog'
     ], (data) => {
         if (data.autoCheck !== undefined) autoCheck.checked = data.autoCheck;
         if (data.autoReload !== undefined) autoReload.checked = data.autoReload;
@@ -75,6 +78,7 @@ document.addEventListener('DOMContentLoaded', () => {
         areaSelectMode.value = data.areaSelectMode || 'from top to bottom';
         if (data.areaAutoFallback !== undefined) areaAutoFallback.checked = data.areaAutoFallback;
         if (data.playSound !== undefined) playSound.checked = data.playSound;
+        kktixSeatMode.value = data.kktixSeatMode || 'none';
 
         if (data.autoFill !== undefined) autoFill.checked = data.autoFill;
         if (data.autoRun !== undefined) autoRun.checked = data.autoRun;
@@ -83,6 +87,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (data.typingMode) typingMode.value = data.typingMode;
         captchaLength.value = data.captchaLength || 4;
         recognizeTimes.value = data.recognizeTimes || 1;
+        if (data.debugLog !== undefined) debugLog.checked = data.debugLog;
 
         if (data.savedSelector) {
             fieldInfo.style.display = 'block';
@@ -115,6 +120,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     areaSelectMode.addEventListener('change', () => chrome.storage.local.set({ areaSelectMode: areaSelectMode.value }));
     areaAutoFallback.addEventListener('change', () => chrome.storage.local.set({ areaAutoFallback: areaAutoFallback.checked }));
+    kktixSeatMode.addEventListener('change', () => chrome.storage.local.set({ kktixSeatMode: kktixSeatMode.value }));
     playSound.addEventListener('change', () => chrome.storage.local.set({ playSound: playSound.checked }));
 
     autoFill.addEventListener('change', () => chrome.storage.local.set({ autoFill: autoFill.checked }));
@@ -144,6 +150,49 @@ document.addEventListener('DOMContentLoaded', () => {
         if (v > 5) v = 5;
         recognizeTimes.value = v;
         chrome.storage.local.set({ recognizeTimes: v });
+    });
+
+    debugLog.addEventListener('change', () => chrome.storage.local.set({ debugLog: debugLog.checked }));
+
+    // 匯出紀錄為 TXT（含版本／時間／網址與目前設定）
+    exportLogBtn.addEventListener('click', () => {
+        chrome.storage.local.get(['tsLogs', 'serverUrl', 'autoCheck', 'autoReload', 'dropdownValue',
+            'autoClickZone', 'zoneKeywords', 'keywordExclude', 'areaSelectMode', 'areaAutoFallback',
+            'kktixSeatMode', 'autoFill', 'autoRun', 'yiiHashEnabled', 'autoSubmit', 'typingMode',
+            'captchaLength', 'recognizeTimes'], (d) => {
+            chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+                const url = tabs && tabs[0] ? tabs[0].url : '(未知)';
+                const logs = (d && d.tsLogs) || [];
+                const lines = [];
+                lines.push('# TicketSniper 除錯紀錄');
+                lines.push('版本：' + chrome.runtime.getManifest().version);
+                lines.push('匯出時間：' + new Date().toLocaleString('zh-TW', { hour12: false }));
+                lines.push('頁面網址：' + url);
+                lines.push('設定：' + JSON.stringify({
+                    serverUrl: d.serverUrl, autoCheck: d.autoCheck, autoReload: d.autoReload,
+                    dropdownValue: d.dropdownValue, autoClickZone: d.autoClickZone,
+                    zoneKeywords: d.zoneKeywords, keywordExclude: d.keywordExclude,
+                    areaSelectMode: d.areaSelectMode, areaAutoFallback: d.areaAutoFallback,
+                    kktixSeatMode: d.kktixSeatMode, autoFill: d.autoFill, autoRun: d.autoRun,
+                    yiiHashEnabled: d.yiiHashEnabled, autoSubmit: d.autoSubmit,
+                    typingMode: d.typingMode, captchaLength: d.captchaLength,
+                    recognizeTimes: d.recognizeTimes
+                }));
+                lines.push('--- 紀錄 (' + logs.length + ' 筆) ---');
+                if (logs.length === 0) {
+                    lines.push('（目前沒有紀錄；請先勾選「啟用除錯紀錄」並重新整理目標頁）');
+                } else {
+                    lines.push(...logs);
+                }
+                const blob = new Blob([lines.join('\r\n')], { type: 'text/plain;charset=utf-8' });
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = 'TicketSniper_log_' + new Date().toISOString().replace(/[:.]/g, '-') + '.txt';
+                document.body.appendChild(a);
+                a.click();
+                setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+            });
+        });
     });
 
     let urlTimer = null;

@@ -107,6 +107,15 @@
             <label class="line"><input type="checkbox" id="areaAutoFallback"> 關鍵字找不到時自動遞補（依選區順序）</label>
         </div>
         <div class="item">
+            <label class="cap">KKTIX 選好票數後自動按：</label>
+            <select id="kktixSeatMode">
+                <option value="none">不自動（手動按）</option>
+                <option value="self">自動按「自行選位」</option>
+                <option value="auto">自動按「電腦配位／電腦選位」</option>
+            </select>
+            <div class="hint">若該頁沒有選位選項（只有「下一步」），會自動按「下一步」。</div>
+        </div>
+        <div class="item">
             <label class="line"><input type="checkbox" id="playSound"> 搶到票／送出成功時播放提示音</label>
         </div>
     </div>
@@ -153,6 +162,15 @@
             <input type="number" id="recognizeTimes" class="small-num" value="1" min="1" max="5">
         </div>
         <div class="hint">長度 1–10；重試 1–5（長度不符才續試）</div>
+    </div>
+
+    <div class="section">
+        <h3>📝 紀錄（回報用）</h3>
+        <div class="item">
+            <label class="line"><input type="checkbox" id="debugLog"> 啟用除錯紀錄</label>
+            <div class="hint">開啟後會記錄自動化過程，可按下方匯出成 TXT 回報。</div>
+        </div>
+        <button id="exportLogBtn" class="secondary-btn">💾 匯出紀錄 (.txt)</button>
     </div>
 
     <div id="field-info" style="display:none;">

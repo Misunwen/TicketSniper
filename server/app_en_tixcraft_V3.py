@@ -24,6 +24,10 @@ except Exception:
 APP_VERSION = '45.0'
 MAX_IMAGE_BYTES = 4 * 1024 * 1024  # 單張圖片大小上限 4MB
 
+# launcher 啟動時注入的 CDP 受信任點擊控制資訊（未提供則擴充功能自動退回一般點擊）
+CONTROL_URL = os.environ.get('TS_CONTROL_URL', '').strip()
+CONTROL_TOKEN = os.environ.get('TS_CONTROL_TOKEN', '').strip()
+
 # ==========================================
 # 📝 辨識紀錄檔（tab 分隔，結尾 .dat，可用 Excel 開啟）
 # ==========================================
@@ -102,6 +106,14 @@ app = Flask(__name__)
 # CORS：/health 供擴充功能檢查（開放）；/recognize 僅允許目標平台與擴充功能來源讀取
 CORS(app, resources={
     r"/health": {"origins": "*"},
+    r"/config": {
+        "origins": [
+            r"https://([a-z0-9-]+\.)*tixcraft\.com$",
+            r"chrome-extension://.*",
+            "http://localhost:5000",
+            "http://127.0.0.1:5000",
+        ]
+    },
     r"/recognize": {
         "origins": [
             r"https://([a-z0-9-]+\.)*tixcraft\.com$",
@@ -818,6 +830,20 @@ def make_aggro_split(expected_chars=4, zoom=3.0, gap=5):
 @app.route('/health', methods=['GET'])
 def health_check():
     return jsonify({'success': True, 'status': 'ok', 'version': APP_VERSION})
+
+
+# ==========================================
+# ⚙️ 控制設定（由 launcher 注入的 CDP 受信任點擊資訊）
+# ==========================================
+@app.route('/config', methods=['GET'])
+def get_config():
+    enabled = bool(CONTROL_URL and CONTROL_TOKEN)
+    return jsonify({
+        'success': True,
+        'trustedClick': enabled,
+        'controlUrl': CONTROL_URL.rstrip('/') if enabled else '',
+        'controlToken': CONTROL_TOKEN if enabled else '',
+    })
 
 
 # ==========================================

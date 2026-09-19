@@ -22,6 +22,12 @@ dist/
 recognition_log.dat
 recognition_log_*.dat
 
+# 啟動器輸出紀錄（執行時產生）
+launcher/launcher_log.txt
+
+# 擴充功能匯出的除錯紀錄（回報用，含平台資訊）
+TicketSniper_log_*.txt
+
 # 作業系統 / 編輯器
 Thumbs.db
 desktop.ini

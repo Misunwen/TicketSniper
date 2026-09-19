@@ -1,10 +1,17 @@
 // =========================================================================
 // 🔺 只在真正需要橋接的 ibon UTK 頁面注入 inject.js（不在整個 ibon 網域執行）
 // =========================================================================
-// 除錯開關：預設關閉。日誌只留在擴充功能的隔離世界（頁面讀不到），
-// 不輸出 console、不插入任何 DOM，避免留下可被偵測的痕跡。
-const TS_DEBUG = false;
+// 除錯紀錄開關（由 popup 控制，預設關）：關閉時完全不記錄、不輸出。
+let _debugLog = false;
 window.botLogs = [];
+try {
+    chrome.storage.local.get(['debugLog'], d => { _debugLog = !!(d && d.debugLog); });
+    chrome.storage.onChanged.addListener((changes, area) => {
+        if (area === 'local' && changes.debugLog) {
+            _debugLog = changes.debugLog.newValue === true;
+        }
+    });
+} catch (e) {}
 
 // 每次載入隨機產生的橋接 token（取代固定字串，避免被頁面監聽辨識）
 const IBON_BRIDGE_TOKEN = '__ts_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
@@ -64,24 +71,58 @@ function normalizeText(str) {
         .trim();
 }
 
-// ③ 日誌輸出（預設靜音；僅在除錯時輸出 console）
-function extLog(message) {
-    let time = new Date().toLocaleTimeString('zh-TW', {
-        hour12: false,
-        fractionalSecondDigits: 3
+// ③ 日誌輸出（由 popup 的「啟用除錯紀錄」控制）
+// 跨頁保留：每次只把「新產生」的紀錄附加到 storage，避免換頁覆蓋舊紀錄。
+let _logFlushTimer = null;
+let _flushedCount = 0;
+let _flushChain = Promise.resolve();
+
+function _flushLogs() {
+    try {
+        const count = window.botLogs.length;
+        const pending = window.botLogs.slice(_flushedCount, count);
+        if (pending.length === 0) return;
+        _flushedCount = count;
+        // 串行化 get→set，避免連續 flush 互相覆蓋而遺失紀錄
+        _flushChain = _flushChain.then(() => new Promise(resolve => {
+            try {
+                chrome.storage.local.get(['tsLogs'], d => {
+                    const existing = (d && d.tsLogs) || [];
+                    const merged = existing.concat(pending).slice(-1500);
+                    try { chrome.storage.local.set({ tsLogs: merged }, resolve); }
+                    catch (e) { resolve(); }
+                });
+            } catch (e) { resolve(); }
+        })).catch(() => {});
+    } catch (e) {}
+}
+function _scheduleLogFlush(delay) {
+    if (_logFlushTimer) return;
+    _logFlushTimer = setTimeout(() => { _logFlushTimer = null; _flushLogs(); }, delay || 250);
+}
+// 換頁／切到背景前先寫入，避免紀錄遺失
+try {
+    window.addEventListener('pagehide', _flushLogs);
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') _flushLogs();
     });
-    let fullMsg = `[${time}] ${message}`;
-    window.botLogs.push(fullMsg);
-    if (window.botLogs.length > 500) {
-        window.botLogs.splice(0, window.botLogs.length - 500);
-    }
-    if (TS_DEBUG) console.info('[TicketSniper]', fullMsg);
+} catch (e) {}
+
+function _nowStr() {
+    const d = new Date();
+    const p = (n, w) => String(n).padStart(w || 2, '0');
+    return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${p(d.getMilliseconds(), 3)}`;
 }
 
-// ⓪ 反偵測注入（extLog 定義後才執行）
-// 注意：真正的反偵測（覆寫頁面 Event.prototype.isTrusted）必須在 MAIN world 執行，
-// 已由 manifest 的 anti_detection.js（world: MAIN）負責。content script 位於
-// ISOLATED world，無法影響頁面；此處僅保留「原生 isTrusted getter」供辨識真人點擊。
+function extLog(message) {
+    if (!_debugLog) return;
+    const fullMsg = `[${_nowStr()}] ${message}`;
+    window.botLogs.push(fullMsg);
+    console.info('[TicketSniper]', fullMsg);
+    _scheduleLogFlush();
+}
+
+// ⓪ 保留原生 isTrusted getter（供辨識真人點擊；不覆寫頁面 Event.prototype）
 (function captureNativeIsTrusted() {
     try {
         const _nativeIsTrustedGet = Object.getOwnPropertyDescriptor(Event.prototype, 'isTrusted').get;
@@ -204,6 +245,115 @@ async function humanClick(el) {
     }
 }
 
+// =========================================================================
+// 🖱️ CDP 受信任點擊（由 launcher 的 control server 發送真實滑鼠事件）
+//    取不到 control 設定時，呼叫端會自動退回 humanClick()。
+// =========================================================================
+let _controlConfig = null;
+
+async function getControlConfig() {
+    if (_controlConfig) return _controlConfig;
+    try {
+        const d = await storageGet(['serverUrl']);
+        const base = (d.serverUrl || 'http://127.0.0.1:5000').replace(/\/+$/, '');
+        const res = await fetch(base + '/config', { method: 'GET' });
+        if (!res.ok) return null;
+        const j = await res.json();
+        if (j && j.trustedClick && j.controlUrl && j.controlToken) {
+            _controlConfig = {
+                url: String(j.controlUrl).replace(/\/+$/, ''),
+                token: String(j.controlToken)
+            };
+        }
+    } catch (e) {}
+    return _controlConfig;
+}
+
+// 計算 <area>（image map）在畫面上的中心點
+function areaClickPoint(el) {
+    try {
+        const map = el.parentElement;
+        const coords = (el.getAttribute('coords') || '').split(',').map(n => parseFloat(n));
+        const shape = (el.getAttribute('shape') || 'rect').toLowerCase();
+        if (!coords.length || coords.some(isNaN)) return null;
+
+        let img = null;
+        const mapName = map && (map.getAttribute('name') || map.id);
+        if (mapName) img = document.querySelector(`img[usemap="#${CSS.escape(mapName)}"]`);
+        if (!img) img = document.querySelector('img[usemap]');
+        if (!img) return null;
+
+        const r = img.getBoundingClientRect();
+        if (!r || r.width <= 0) return null;
+        const sx = r.width / (img.naturalWidth || r.width || 1);
+        const sy = r.height / (img.naturalHeight || r.height || 1);
+
+        let lx, ly;
+        if (shape === 'rect' && coords.length >= 4) {
+            lx = (coords[0] + coords[2]) / 2;
+            ly = (coords[1] + coords[3]) / 2;
+        } else if (shape === 'circle' && coords.length >= 3) {
+            lx = coords[0]; ly = coords[1];
+        } else if (shape === 'poly' && coords.length >= 2) {
+            lx = coords[0]; ly = coords[1];
+        } else {
+            return null;
+        }
+        return { x: r.left + lx * sx, y: r.top + ly * sy };
+    } catch (e) {
+        return null;
+    }
+}
+
+function elementClickPoint(el) {
+    try {
+        if (!el || !el.tagName) return null;
+        if (el.tagName.toLowerCase() === 'area') return areaClickPoint(el);
+        if (el.scrollIntoView) {
+            try { el.scrollIntoView({ block: 'center', inline: 'center' }); } catch (e) {}
+        }
+        const r = el.getBoundingClientRect();
+        if (!r || r.width <= 0 || r.height <= 0) return null;
+        const x = r.left + r.width * (0.35 + Math.random() * 0.3);
+        const y = r.top + r.height * (0.35 + Math.random() * 0.3);
+        if (x < 0 || y < 0) return null;
+        return { x, y };
+    } catch (e) {
+        return null;
+    }
+}
+
+async function trustedClick(el) {
+    const cfg = await getControlConfig();
+    if (!cfg) return false;
+    const pt = elementClickPoint(el);
+    if (!pt) return false;
+    try {
+        const res = await fetch(cfg.url + '/click', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-TS-Token': cfg.token },
+            body: JSON.stringify({ x: pt.x, y: pt.y, href: location.href })
+        });
+        return res.ok;
+    } catch (e) {
+        return false;
+    }
+}
+
+// 優先使用 CDP 受信任點擊，失敗才退回合成事件
+async function clickElement(el) {
+    if (!el) return false;
+    try {
+        if (await trustedClick(el)) {
+            extLog('🖱️ CDP 受信任點擊');
+            await sleep(randInt(30, 90));
+            return true;
+        }
+    } catch (e) {}
+    await humanClick(el);
+    return true;
+}
+
 // ⑦ 判斷數量選擇器
 function isQuantitySelect(sel) {
     if (!sel) return false;
@@ -235,7 +385,7 @@ function makeIrregularInterval(callback, baseMs, jitterMs) {
             try { 
                 await callback(); 
             } catch(e) { 
-                if (TS_DEBUG) console.error(e); 
+                if (_debugLog) console.error(e); 
             }
             next();
         }, delay);
@@ -543,6 +693,17 @@ async function clickIBONTableRow(rowData) {
     if (!targetArea) {
         extLog(`❌ [IBON] 找不到任何 area 元素`);
         return false;
+    }
+
+    // ✅ 優先用 CDP 受信任點擊（image map 以座標換算後點擊）
+    try {
+        if (await trustedClick(targetArea)) {
+            extLog(`✅ [IBON] CDP 受信任點擊 (area=${targetArea.id})`);
+            await sleep(randInt(100, 300));
+            return true;
+        }
+    } catch(e) {
+        extLog(`⚠️ [IBON] 受信任點擊失敗: ${e.message}`);
     }
 
     // ✅ 步驟1：模擬滑鼠移動到 area（產生真實軌跡）
@@ -1260,6 +1421,7 @@ function runTixCraft(settings) {
     let attempts = 0;
     let isStopped = false;
     let isWaitingLogShown = false;
+    let waitTicks = 0;
     let localIsClicking = false;
     let lastLinkCount = -1;
     let captchaHandled = false;
@@ -1285,9 +1447,12 @@ function runTixCraft(settings) {
         let isTicketPage = url.includes('/ticket/ticket/');
         
         if (!isZonePage && !isTicketPage) {
+            waitTicks++;
             if (!isWaitingLogShown) {
-                extLog('🚀 [拓元] 潛伏中... 請手動進入「選區」或「選票」頁面');
+                extLog(`🚀 [拓元] 潛伏中... 請手動進入「選區」或「選票」頁面（目前：${url}）`);
                 isWaitingLogShown = true;
+            } else if (waitTicks % 10 === 0) {
+                extLog(`⏳ [拓元] 等待中… 目前頁面：${url}`);
             }
             setTimeout(loop, 500);
             return;
@@ -1392,7 +1557,7 @@ function runTixCraft(settings) {
                                 playBeep('found');
                                 localIsClicking = true;
                                 isStopped = true;
-                                await humanClick(best.link);
+                                await clickElement(best.link);
                                 return;
                             } else {
                                 if (!isWaitingLogShown) {
@@ -1411,12 +1576,17 @@ function runTixCraft(settings) {
                     // 選票頁：數量與同意條款設定完成後，接手處理驗證碼
                     if (!captchaHandled && captchaPresent()) {
                         captchaHandled = true;
-                        extLog('🧩 [拓元] 偵測到驗證碼，啟動自動辨識...');
-                        let code = await solveCaptchaOnce(true, autoSubmit);
-                        if (code) {
-                            extLog(`✅ [拓元] 驗證碼已填入：${code}`);
+                        if (captchaExecuting) {
+                            // 智慧蹲點已在辨識，讓既有流程處理，避免重複請求
+                            extLog('ℹ️ [拓元] 驗證碼辨識進行中，交由既有流程處理');
                         } else {
-                            extLog('⚠️ [拓元] 驗證碼辨識失敗，改為手動輸入');
+                            extLog('🧩 [拓元] 偵測到驗證碼，啟動自動辨識...');
+                            let code = await solveCaptchaOnce(true, autoSubmit);
+                            if (code) {
+                                extLog(`✅ [拓元] 驗證碼已填入：${code}`);
+                            } else {
+                                extLog('⚠️ [拓元] 驗證碼辨識失敗，改為手動輸入');
+                            }
                         }
                     }
                 }
@@ -1432,6 +1602,57 @@ function runTixCraft(settings) {
 // =========================================================================
 // 🔵 KKTIX 完整版
 // =========================================================================
+// KKTIX：找「自行選位」/「電腦配位」按鈕；若無選位選項（只有「下一步」）則直接按下一步
+function findKKTIXSeatButton(mode) {
+    const buttons = Array.from(document.querySelectorAll('button.btn'));
+    const textOf = b => (b.innerText || '').replace(/\s+/g, '');
+    const clickOf = b => b.getAttribute('ng-click') || '';
+    const pick = (pred) => buttons.find(pred) || null;
+
+    if (mode === 'self') {
+        return pick(b => textOf(b).includes('自行選位'))
+            || pick(b => /challenge\(\s*\)/.test(clickOf(b)))   // 含「下一步」
+            || null;
+    }
+    return pick(b => /電腦(配位|選位)/.test(textOf(b)))
+        || pick(b => /challenge\(\s*1\s*\)/.test(clickOf(b)))
+        || pick(b => textOf(b).includes('下一步'))
+        || pick(b => /challenge\(\s*\)/.test(clickOf(b)))       // 沒有選位選項 → 下一步
+        || null;
+}
+
+function isButtonEnabled(btn) {
+    if (!btn) return false;
+    if (btn.disabled) return false;
+    if (btn.getAttribute('disabled') !== null) return false;
+    if (btn.classList.contains('btn-disabled-alt')) return false;
+    return true;
+}
+
+// 選好票數後，依設定自動點擊選位按鈕
+async function clickKKTIXSeatButton(mode, timeoutMs = 6000) {
+    const want = mode === 'self' ? '自行選位' : '電腦配位';
+    const deadline = Date.now() + timeoutMs;
+    let waitLogged = false;
+    while (Date.now() < deadline) {
+        const btn = findKKTIXSeatButton(mode);
+        if (btn && isButtonEnabled(btn)) {
+            const label = (btn.innerText || '').replace(/\s+/g, '') || want;
+            extLog(`🎯 [KKTIX] 自動點擊「${label}」`);
+            playBeep('found');
+            await clickElement(btn);
+            return true;
+        }
+        if (btn && !isButtonEnabled(btn) && !waitLogged) {
+            extLog(`⏳ [KKTIX] 「${(btn.innerText || '').replace(/\s+/g, '') || want}」尚未可用，等待中...`);
+            waitLogged = true;
+        }
+        await sleep(150);
+    }
+    extLog(`⚠️ [KKTIX] 找不到可用的「${want}」按鈕（可能忙碌中或已跳頁）`);
+    return false;
+}
+
 function runKKTIX(settings) {
     const autoCheck = settings.autoCheck !== false;
     const dropdownValue = settings.dropdownValue === "none" ? 1 : (parseInt(settings.dropdownValue) || 1);
@@ -1441,11 +1662,13 @@ function runKKTIX(settings) {
     const keywordExclude = settings.keywordExclude || DEFAULT_EXCLUDE_KEYWORDS;
     const areaSelectMode = settings.areaSelectMode || 'from top to bottom';
     const areaAutoFallback = settings.areaAutoFallback === true;
+    const kktixSeatMode = settings.kktixSeatMode || 'none';
     
     let attempts = 0;
     let isStopped = false;
     let isWaitingLogShown = false;
     let localIsClicking = false;
+    let agreeClicked = false;
     
     function extractPrice(ticketUnit) {
         if (!ticketUnit) return 0;
@@ -1481,10 +1704,11 @@ function runKKTIX(settings) {
         attempts++;
         try {
             if (!localIsClicking) {
-                if (autoCheck) {
+                if (autoCheck && !agreeClicked) {
                     let cb = document.getElementById('person_agree_terms');
                     if (cb && !cb.checked) {
                         cb.click();
+                        agreeClicked = true;
                         extLog("✅ [KKTIX] 已勾選同意條款");
                         setTimeout(loop, randInt(300, 500));
                         return;
@@ -1572,12 +1796,18 @@ function runKKTIX(settings) {
                             extLog(`🎯 [KKTIX] 鎖定：${label}（TWD$${price}），連點 ${dropdownValue} 張...`);
                             playBeep('found');
                             for (let i = 0; i < dropdownValue; i++) {
-                                await humanClick(plusBtn);
+                                await clickElement(plusBtn);
                                 if (i < dropdownValue - 1) {
                                     await sleep(randInt(10, 30) + randInt(0, 5));
                                 }
                             }
-                            extLog(`✅ [KKTIX] 已完成 ${dropdownValue} 張！請手動完成驗證碼！`);
+                            extLog(`✅ [KKTIX] 已完成 ${dropdownValue} 張！`);
+                            if (kktixSeatMode === 'self' || kktixSeatMode === 'auto') {
+                                await sleep(randInt(200, 500));
+                                await clickKKTIXSeatButton(kktixSeatMode);
+                            } else {
+                                extLog('ℹ️ [KKTIX] 未設定自動選位，請手動按「自行選位／電腦配位」');
+                            }
                             return;
                         }
                     }
@@ -1611,7 +1841,7 @@ function startAutoFill() {
     
     chrome.storage.local.get(
         ['autoCheck', 'autoReload', 'dropdownValue', 'autoClickZone', 'zoneKeywords', 'autoSubmit',
-         'keywordExclude', 'areaSelectMode', 'areaAutoFallback', 'playSound'],
+         'keywordExclude', 'areaSelectMode', 'areaAutoFallback', 'playSound', 'kktixSeatMode'],
         function(data) {
             let raw = data || {};
             let toBool = v => v === true || v === 'true';
@@ -1625,14 +1855,15 @@ function startAutoFill() {
                 dropdownValue: raw.dropdownValue || "none",
                 zoneKeywords: raw.zoneKeywords || "",
                 keywordExclude: raw.keywordExclude || DEFAULT_EXCLUDE_KEYWORDS,
-                areaSelectMode: raw.areaSelectMode || "from top to bottom"
+                areaSelectMode: raw.areaSelectMode || "from top to bottom",
+                kktixSeatMode: raw.kktixSeatMode || "none"
             };
 
             window.__tsPlaySound = settings.playSound;
             window.__tsSubmitted = false;
             
-            extLog(`🚀 [路由] 平台：${platform}`);
-            extLog(`🚀 [路由] 設定：autoCheck=${settings.autoCheck}, autoReload=${settings.autoReload}, autoClickZone=${settings.autoClickZone}, mode=${settings.areaSelectMode}`);
+            extLog(`🚀 [路由] 平台：${platform}｜${window.location.href}`);
+            extLog(`🚀 [路由] 設定：autoCheck=${settings.autoCheck}, autoReload=${settings.autoReload}, autoClickZone=${settings.autoClickZone}, mode=${settings.areaSelectMode}, kktixSeatMode=${settings.kktixSeatMode}`);
             
             if (platform === 'TIXCRAFT') runTixCraft(settings);
             else if (platform === 'KKTIX') runKKTIX(settings);
@@ -1836,7 +2067,7 @@ function convertImageToBase64(captchaImg, callback) {
             ctx.drawImage(img, 0, 0);
             callback(canvas.toDataURL('image/png'));
         } catch (e) {
-            if (TS_DEBUG) console.warn('[TicketSniper] canvas 轉換失敗:', e);
+            if (_debugLog) console.warn('[TicketSniper] canvas 轉換失敗:', e);
             callback(null);
         }
     };

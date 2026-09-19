@@ -4,6 +4,42 @@
 格式參考 [Keep a Changelog](https://keepachangelog.com/zh-TW/1.1.0/)，
 版本號遵循 [Semantic Versioning](https://semver.org/lang/zh-TW/)。
 
+## [1.3.0] - 2026-09-19
+
+### Added
+- **CDP 受信任點擊**：由 `launcher` 啟動一個只綁定 `127.0.0.1` 的本機控制伺服器
+  （`launcher/control_server.py`，需 `X-TS-Token`），擴充功能取得元素座標後改以
+  nodriver/CDP `Input.dispatchMouseEvent` 發送真正的滑鼠事件（`isTrusted` 為 `true`），
+  取代網頁層級的合成事件。適用於 tixcraft 選區、KKTIX 加票，以及 ibon image map
+  票區（以 `coords` 換算座標；失敗時自動退回原本的 `callSend` 橋接）。
+- 伺服器新增 `GET /config`（CORS 僅允許目標平台與擴充功能），回傳控制伺服器網址與
+  token；未由 launcher 啟動時 `trustedClick=false`，擴充功能自動退回一般點擊。
+- `launcher/config.json` / `config` 新增 `trusted_click`、`control_port`。
+- **封鎖追蹤／分析請求（選用，預設關閉）**：launcher 可用 CDP
+  `Network.setBlockedURLs` 封鎖 GA／GTM／DoubleClick／Facebook Pixel／Cloudflare
+  Insights／Clarity／Hotjar 等分析與側錄腳本，以及 ibon DMP 主機。
+  **預設 `block_trackers: false`**：缺少 analytics／側錄 beacon 反而會被部分平台
+  判定為機器人（參考 `tickets_hunter` 的紀錄），經實測開啟時會直接被 IBON 限制，
+  故預設關閉，僅在確認不影響的平台才建議開啟。
+- **KKTIX 選位控制**：設定面板新增「選好票數後自動按」選項，可選擇
+  `不自動`／`自動按「自行選位」`（`challenge()`）／`自動按「電腦配位／電腦選位」`
+  （`challenge(1)`）；選好張數後會等待按鈕可用再點擊（受信任點擊優先）。
+  若該頁沒有選位選項（按鈕只有「下一步」），會直接按「下一步」繼續。
+- **除錯紀錄與匯出**：popup 新增「啟用除錯紀錄」開關與「匯出紀錄 (.txt)」按鈕；
+  開啟後會記錄自動化過程並可下載成 TXT（含版本、時間、網址與設定），方便回報。
+  預設關閉；關閉時完全不記錄、不輸出。
+- **啟動器輸出紀錄**：`launcher` 主控台輸出同步寫入 `launcher/launcher_log.txt`
+  （可用 `save_log: false` 關閉；已加入 .gitignore）。
+
+### Fixed
+- 拓元選票頁：智慧蹲點與選票頁流程同時要辨識時，後者因 `captchaExecuting` 回傳
+  `null` 被誤記為「驗證碼辨識失敗」。改為偵測到辨識進行中即交由既有流程處理，不再誤報。
+- KKTIX：勾選同意條款在 Angular 尚未反映狀態前會重複點擊，改為每個頁面只勾一次。
+
+### Notes
+- 受信任點擊需由 `啟動瀏覽器.bat`（launcher）啟動；若 OCR 伺服器是以
+  `啟動伺服器.bat` 手動啟動，則沒有控制資訊，會使用原本的合成事件。
+
 ## [1.2.1] - 2026-09-19
 
 ### Changed

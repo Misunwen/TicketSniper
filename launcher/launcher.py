@@ -15,6 +15,7 @@ Chrome 137+ 只在「品牌 Chrome」移除 --load-extension；Chrome for Testin
 import asyncio
 import json
 import platform
+import secrets
 import shutil
 import subprocess
 import sys
@@ -22,6 +23,12 @@ import time
 import urllib.request
 import zipfile
 from pathlib import Path
+
+try:
+    from control_server import ControlServer
+except Exception:  # 允許從其他工作目錄匯入
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from control_server import ControlServer
 
 try:
     sys.stdout.reconfigure(encoding='utf-8')
@@ -45,8 +52,64 @@ DEFAULTS = {
     "open_extensions_page": False,
     "start_server": True,
     "server_url": "http://127.0.0.1:5000",
+    "trusted_click": True,
+    "control_port": 5100,
+    "block_trackers": False,
+    "save_log": True,
     "extra_args": []
 }
+
+# 參考 tickets_hunter 的 nodrver_block_urls：封鎖分析／追蹤／側錄／廣告請求，
+# 降低行為被收集與指紋化的機率（不影響購票畫面必要資源）。
+TRACKER_BLOCKLIST = [
+    # 分析與廣告
+    '*google-analytics.*',
+    '*analytics.google.com/*',
+    '*googletagmanager.*',
+    '*googlesyndication.*',
+    '*googletagservices.*',
+    '*googleadservices.com/*',
+    '*adtrafficquality.google/*',
+    '*doubleclick.net/*',
+    '*connect.facebook.net/*/fbevents.js',
+    '*connect.facebook.net/signals/*',
+    '*fundingchoicesmessages.google.com/*',
+    '*img.uniicreative.com/*',
+    # 行為側錄 / 工作階段重播（會記錄滑鼠軌跡、點擊）
+    '*static.cloudflareinsights.com/*',
+    '*clarity.ms/*',
+    '*hotjar.com/*',
+    '*hotjar.io/*',
+    '*smartlook.com/*',
+    '*rollbar.com/*',
+    # 行銷自動化 / DMP
+    '*appier.net/*',
+    '*.c.appier.net/*',
+    '*api.quantumgraph.com/*',
+    '*cdn.qgr.ph/*',
+    '*.aiqua.io/*',
+    '*lndata.com/*',
+    '*anymind360.com/*',
+    '*cdn.cookielaw.org/*',
+    '*geolocation.onetrust.com/*',
+    '*tour-uat.ibon.com.tw/*',
+    # 客服聊天元件
+    '*chat.botbonnie.com/*',
+    '*asset.botbonnie.com/*',
+    '*web-chat-service.project.imbee.io/*',
+    '*web-chat-assets.imbee.io/*',
+    # 廣告腳本
+    '*/adblock.js',
+    '*/google_ad_block.js',
+    '*ticketmaster.sg/js/adblock*',
+    '*ticketmaster.sg/js/ads.js*',
+    '*ticketmaster.com/js/ads.js*',
+    # 社群 / 影音嵌入
+    '*platform.twitter.com/*',
+    '*syndication.twitter.com/*',
+    '*youtube.com/*',
+    '*player.youku.*',
+]
 
 # 參考 tickets_hunter（MaxBot）經 Cloudflare 驗證的啟動參數：關閉多餘背景服務、
 # 通知、翻譯、同步等，讓瀏覽器環境更接近一般使用者（降低被偵測機率）。
@@ -141,7 +204,7 @@ def is_server_up(url):
         return False
 
 
-def start_server_and_wait(cfg):
+def start_server_and_wait(cfg, extra_env=None):
     url = (cfg.get('server_url') or 'http://127.0.0.1:5000')
     if is_server_up(url):
         print(f"ℹ OCR 伺服器已在執行：{url}")
@@ -156,7 +219,11 @@ def start_server_and_wait(cfg):
 
     ensure_server_deps()
     print(f"▶ 啟動 OCR 伺服器：{server_py}")
-    proc = subprocess.Popen([sys.executable, str(server_py)], cwd=str(server_py.parent))
+    import os
+    env = dict(os.environ)
+    if extra_env:
+        env.update(extra_env)
+    proc = subprocess.Popen([sys.executable, str(server_py)], cwd=str(server_py.parent), env=env)
     deadline = time.time() + 40
     while time.time() < deadline:
         if is_server_up(url):
@@ -226,6 +293,16 @@ def ensure_chrome_for_testing(cfg):
 
 
 # =========================================================================
+# 網路封鎖（追蹤／分析）
+# =========================================================================
+async def block_trackers(tab, urls):
+    """透過 CDP Network.setBlockedURLs 封鎖追蹤請求（不影響購票必要資源）。"""
+    from nodriver.cdp import network as cdp_network
+    await tab.send(cdp_network.enable())
+    await tab.send(cdp_network.set_blocked_ur_ls(urls=urls))
+
+
+# =========================================================================
 # 主流程
 # =========================================================================
 async def main():
@@ -241,8 +318,16 @@ async def main():
     url = (cfg.get('url') or '').strip()
     profile.mkdir(parents=True, exist_ok=True)
 
+    # CDP 受信任點擊：先產生 token／port，讓 OCR 伺服器能提供給擴充功能
+    control_token = secrets.token_urlsafe(24)
+    control_port = int(cfg.get('control_port') or 5100)
+    control_env = {
+        'TS_CONTROL_URL': f'http://127.0.0.1:{control_port}',
+        'TS_CONTROL_TOKEN': control_token,
+    }
+
     # 1) OCR 伺服器
-    server_proc = start_server_and_wait(cfg)
+    server_proc = start_server_and_wait(cfg, control_env)
 
     # 2) 瀏覽器執行檔
     chrome_exe, using_cft = ensure_chrome_for_testing(cfg)
@@ -277,12 +362,41 @@ async def main():
         uc_kwargs['browser_executable_path'] = chrome_exe
 
     browser = await uc.start(**uc_kwargs)
+
+    # 3.5) 封鎖追蹤／分析請求
+    if cfg.get('block_trackers', True):
+        try:
+            await block_trackers(browser.main_tab, TRACKER_BLOCKLIST)
+            print(f"✅ 已封鎖 {len(TRACKER_BLOCKLIST)} 項追蹤／分析請求")
+        except Exception as e:
+            print(f"⚠ 封鎖追蹤請求失敗（不影響其他功能）：{e}")
+
+    # 4) CDP 控制伺服器（受信任點擊）
+    control_server = None
+    if cfg.get('trusted_click', True):
+        try:
+            control_server = ControlServer(
+                browser=browser, loop=asyncio.get_running_loop(),
+                token=control_token, host='127.0.0.1', port=control_port)
+            control_server.start()
+            print(f"✅ CDP 受信任點擊控制埠：http://127.0.0.1:{control_port}")
+        except Exception as e:
+            control_server = None
+            print(f"⚠ 無法啟動 CDP 控制伺服器（將改用一般點擊）：{e}")
+
     if url:
         await browser.get(url)
         print(f"✅ 已開啟：{url}")
     else:
         await browser.get("about:blank")
         print("ℹ config.json 的 url 為空，已開新分頁；請填入目標網址後重新啟動。")
+
+    # 導覽後再套用一次（確保在此分頁的 Network domain 已建立）
+    if cfg.get('block_trackers', True):
+        try:
+            await block_trackers(browser.main_tab, TRACKER_BLOCKLIST)
+        except Exception:
+            pass
 
     if cfg.get('open_extensions_page'):
         try:
@@ -298,6 +412,8 @@ async def main():
     except (KeyboardInterrupt, asyncio.CancelledError):
         pass
     finally:
+        if control_server:
+            control_server.stop()
         try:
             browser.stop()
         except Exception:
@@ -309,9 +425,60 @@ async def main():
                 pass
 
 
+# =========================================================================
+# 輸出紀錄（把主控台輸出同時寫入 launcher_log.txt，方便回報）
+# =========================================================================
+class _Tee:
+    def __init__(self, *streams):
+        self.streams = streams
+
+    def write(self, data):
+        for s in self.streams:
+            try:
+                s.write(data)
+            except Exception:
+                pass
+
+    def flush(self):
+        for s in self.streams:
+            try:
+                s.flush()
+            except Exception:
+                pass
+
+
+def _setup_log_file():
+    try:
+        cfg_path = BASE / 'config.json'
+        save = True
+        if cfg_path.exists():
+            try:
+                save = json.loads(cfg_path.read_text(encoding='utf-8')).get('save_log', True)
+            except Exception:
+                pass
+        if not save:
+            return None
+        f = open(BASE / 'launcher_log.txt', 'w', encoding='utf-8')
+        out = sys.__stdout__ or sys.stdout
+        err = sys.__stderr__ or sys.stderr
+        sys.stdout = _Tee(out, f)
+        sys.stderr = _Tee(err, f)
+        print(f"ℹ 啟動器輸出同步寫入：{BASE / 'launcher_log.txt'}")
+        return f
+    except Exception:
+        return None
+
+
 if __name__ == '__main__':
+    _log_file = _setup_log_file()
     try:
         import nodriver as uc
         uc.loop().run_until_complete(main())
     except KeyboardInterrupt:
         print("\n已結束。")
+    finally:
+        if _log_file:
+            try:
+                _log_file.close()
+            except Exception:
+                pass

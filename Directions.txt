@@ -22,6 +22,7 @@ TicketSniper/
 │  └─ recognition_log.dat     辨識紀錄（執行後產生）
 ├─ launcher/           nodriver 啟動器（可選）
 │  ├─ launcher.py      用 nodriver 開專用 Chrome 並導到目標網址
+│  ├─ control_server.py 本機 CDP 控制伺服器（受信任點擊）
 │  └─ config.json      設定（網址／profile／是否載入外掛…）
 ├─ tools/              輔助工具
 │  └─ setup_deps.py    套件檢測＋自動安裝（安裝套件.bat 會呼叫）
@@ -82,6 +83,8 @@ TicketSniper/
 - 輸入模式：逐字模擬（安全）或瞬間帶入（快）。
 - 驗證碼長度：通常為 4。
 - 重試次數：辨識長度不符時最多換圖重試次數。
+- 【紀錄（回報用）】啟用除錯紀錄：開啟後記錄自動化過程（預設關）；
+  按「匯出紀錄 (.txt)」可下載成文字檔回報（含版本、時間、網址與設定）。
 
 ----------------------------------------
  第四步（可選）：用 nodriver 啟動瀏覽器（全自動）
@@ -102,6 +105,11 @@ TicketSniper/
   * server_url：OCR 伺服器網址（預設 http://127.0.0.1:5000）。
   * start_server：false 則不自動啟動伺服器。
   * browser_executable_path：指定瀏覽器執行檔（留空則用 Chrome for Testing）。
+  * trusted_click：true（預設）時，點擊改用 CDP 受信任滑鼠事件（較不易被偵測）。
+  * control_port：受信任點擊控制埠（預設 5100，僅綁定 127.0.0.1）。
+  * block_trackers：預設 false。設 true 會封鎖分析／追蹤／側錄請求；但部分平台
+    （如 IBON）會因缺少追蹤 beacon 而判定為機器人，請確認不影響後再開啟。
+  * save_log：預設 true，會把啟動器輸出同步寫入 launcher/launcher_log.txt。
 
 ----------------------------------------
  操作小技巧
