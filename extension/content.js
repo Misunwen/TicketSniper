@@ -224,21 +224,21 @@ async function humanClick(el) {
         };
         
         el.focus();
-        await sleep(randInt(10, 30));
+        await sleep(randInt(110, 150));
         el.dispatchEvent(make('pointerover'));
         el.dispatchEvent(make('mouseover'));
-        await sleep(randInt(20, 60));
+        await sleep(randInt(110, 150));
         el.dispatchEvent(make('pointermove'));
         el.dispatchEvent(make('mousemove'));
-        await sleep(randInt(15, 40));
+        await sleep(randInt(110, 150));
         el.dispatchEvent(make('pointerdown'));
         el.dispatchEvent(make('mousedown'));
-        await sleep(randInt(40, 100));
+        await sleep(randInt(110, 150));
         el.dispatchEvent(make('pointerup'));
         el.dispatchEvent(make('mouseup'));
-        await sleep(randInt(10, 30));
+        await sleep(randInt(110, 150));
         el.dispatchEvent(make('click'));
-        await sleep(randInt(50, 150));
+        await sleep(randInt(110, 150));
         el.dispatchEvent(new FocusEvent('blur', { bubbles: true }));
     } catch(e) {
         extLog(`⚠️ 模擬點擊失敗: ${e.message}`);
@@ -346,7 +346,7 @@ async function clickElement(el) {
     try {
         if (await trustedClick(el)) {
             extLog('🖱️ CDP 受信任點擊');
-            await sleep(randInt(30, 90));
+            await sleep(randInt(110, 150));
             return true;
         }
     } catch (e) {}
@@ -369,26 +369,22 @@ async function ensureChecked(cb) {
     if (!cb) return false;
     for (let i = 0; i < 4; i++) {
         if (cb.checked) return true;
-        // 1) 原生 .click()（會 toggle 並觸發 change，Angular 才會更新）
-        try { cb.click(); } catch (e) {}
-        await sleep(150);
+        // 1) CDP 受信任點擊優先（launcher 模式；含模擬滑鼠移動）
+        try { await clickElement(cb); } catch (e) {}
+        await sleep(randInt(110, 150));
         if (cb.checked) return true;
-        // 2) 第二輪起：CDP 受信任點擊（launcher 模式）
-        if (i >= 1) {
-            try { await clickElement(cb); } catch (e) {}
-            await sleep(150);
-            if (cb.checked) return true;
-        }
-        // 3) 第三輪起：原生 setter + input/change/click 事件
-        if (i >= 2) {
-            try {
-                setNativeChecked(cb, true);
-                cb.dispatchEvent(new Event('input', { bubbles: true }));
-                cb.dispatchEvent(new Event('change', { bubbles: true }));
-            } catch (e) {}
-            await sleep(120);
-            if (cb.checked) return true;
-        }
+        // 2) 原生 .click()（會 toggle 並觸發 change，Angular 才會更新）
+        try { cb.click(); } catch (e) {}
+        await sleep(randInt(110, 150));
+        if (cb.checked) return true;
+        // 3) 原生 setter + input/change 事件
+        try {
+            setNativeChecked(cb, true);
+            cb.dispatchEvent(new Event('input', { bubbles: true }));
+            cb.dispatchEvent(new Event('change', { bubbles: true }));
+        } catch (e) {}
+        await sleep(randInt(110, 150));
+        if (cb.checked) return true;
     }
     return !!cb.checked;
 }
@@ -736,9 +732,10 @@ async function clickIBONTableRow(rowData) {
 
     // ✅ 優先用 CDP 受信任點擊（image map 以座標換算後點擊）
     try {
+        await sleep(randInt(110, 150));
         if (await trustedClick(targetArea)) {
             extLog(`✅ [IBON] CDP 受信任點擊 (area=${targetArea.id})`);
-            await sleep(randInt(100, 300));
+            await sleep(randInt(110, 150));
             return true;
         }
     } catch(e) {
@@ -826,6 +823,11 @@ async function runIBONQty(settings) {
                 globalIBONScanner.stop();
                 globalIBONScanner = null;
             }
+
+            if (settings.ibonAutoNext !== false) {
+                await sleep(randInt(300, 800));
+                await clickIBONNext();
+            }
             
             return true;
         } catch(e) {
@@ -841,6 +843,50 @@ async function runIBONQty(settings) {
     }
     
     return false;
+}
+
+// 數量設定完成後，自動按「下一步」（ASP.NET postback 連結）
+async function clickIBONNext() {
+    let el = document.querySelector('#ctl00_ContentPlaceHolder1_A2');
+    if (!el) {
+        el = Array.from(document.querySelectorAll('a, button, input[type="submit"]'))
+            .find(e => ((e.innerText || e.value || '').trim() === '下一步'));
+    }
+    if (!el) {
+        extLog('ℹ️ [IBON] 找不到「下一步」按鈕');
+        return false;
+    }
+
+    const href = el.getAttribute('href') || '';
+    const m = href.match(/__doPostBack\('([^']*)','([^']*)'\)/);
+    const target = m ? m[1] : (el.id || '');
+
+    // 1) launcher 模式：CDP 受信任點擊（等同真人點擊）
+    try {
+        if (await trustedClick(el)) {
+            extLog('✅ [IBON] 已按「下一步」（CDP 受信任點擊）');
+            return true;
+        }
+    } catch (e) {}
+
+    // 2) 直接呼叫頁面的 __doPostBack（合成 click 常只轉圈不送出）
+    if (target) {
+        try {
+            window.postMessage({ type: IBON_BRIDGE_TOKEN, script: `__doPostBack('${target}','')` }, '*');
+            extLog(`✅ [IBON] 已送出「下一步」(__doPostBack ${target})`);
+            return true;
+        } catch (e) {}
+    }
+
+    // 3) 後備：合成 click
+    try {
+        el.click();
+        extLog('✅ [IBON] 已按「下一步」');
+        return true;
+    } catch (e) {
+        extLog('⚠️ [IBON] 按「下一步」失敗：' + e.message);
+        return false;
+    }
 }
 
 // =========================================================================
@@ -1882,7 +1928,7 @@ function runKKTIX(settings) {
                             for (let i = 0; i < dropdownValue; i++) {
                                 await clickElement(plusBtn);
                                 if (i < dropdownValue - 1) {
-                                    await sleep(randInt(10, 30) + randInt(0, 5));
+                                    await sleep(randInt(110, 150));
                                 }
                             }
                             extLog(`✅ [KKTIX] 已完成 ${dropdownValue} 張！`);
@@ -1925,7 +1971,7 @@ function startAutoFill() {
     
     chrome.storage.local.get(
         ['autoCheck', 'autoReload', 'dropdownValue', 'autoClickZone', 'zoneKeywords', 'autoSubmit',
-         'keywordExclude', 'areaSelectMode', 'areaAutoFallback', 'playSound', 'kktixSeatMode', 'ibonAuto'],
+         'keywordExclude', 'areaSelectMode', 'areaAutoFallback', 'playSound', 'kktixSeatMode', 'ibonAuto', 'ibonAutoNext'],
         function(data) {
             let raw = data || {};
             let toBool = v => v === true || v === 'true';
@@ -1941,7 +1987,8 @@ function startAutoFill() {
                 keywordExclude: raw.keywordExclude || DEFAULT_EXCLUDE_KEYWORDS,
                 areaSelectMode: raw.areaSelectMode || "from top to bottom",
                 kktixSeatMode: raw.kktixSeatMode || "none",
-                ibonAuto: raw.ibonAuto !== false
+                ibonAuto: raw.ibonAuto !== false,
+                ibonAutoNext: raw.ibonAutoNext !== false
             };
 
             window.__tsPlaySound = settings.playSound;
@@ -2443,6 +2490,10 @@ if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage)
         } else if (request.action === 'recognizeNow') {
             solveCaptchaOnce(true, false, request.autoFill !== false).then(text => sendResponse({ text: text || null }));
             return true;
+        } else if (request.action === 'clearLogs') {
+            window.botLogs = [];
+            _flushedCount = 0;
+            sendResponse({ status: 'ok' });
         }
     });
 }

@@ -120,6 +120,10 @@
             <div class="hint">若改用 launcher 的 CDP 模式（config 的 ibon_auto），請取消此項以免重複操作。</div>
         </div>
         <div class="item">
+            <label class="line"><input type="checkbox" id="ibonAutoNext" checked> IBON 選完張數後自動按「下一步」</label>
+            <div class="hint">數量頁設定好張數後自動送出下一步（可能直接進訂單確認，請自行評估）。</div>
+        </div>
+        <div class="item">
             <label class="line"><input type="checkbox" id="playSound"> 搶到票／送出成功時播放提示音</label>
         </div>
     </div>
@@ -175,6 +179,7 @@
             <div class="hint">開啟後會記錄自動化過程，可按下方匯出成 TXT 回報。</div>
         </div>
         <button id="exportLogBtn" class="secondary-btn">💾 匯出紀錄 (.txt)</button>
+        <button id="clearLogBtn" class="danger-btn" style="margin-top:7px;">🗑️ 清除紀錄</button>
     </div>
 
     <div id="field-info" style="display:none;">

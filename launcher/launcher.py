@@ -74,6 +74,7 @@ DEFAULTS = {
     "ibon_exclude_keyword": "輪椅;身障;身心;障礙;Restricted View;燈柱遮蔽;視線不完整",
     "ibon_fallback": False,
     "ibon_ticket_count": 1,
+    "ibon_auto_next": True,
     "ibon_spa_keyword": "",
     "ibon_spa_query": "button, a, [role=\"button\"]",
     "extra_args": []

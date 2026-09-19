@@ -17,7 +17,9 @@ IBON（orders.ibon.com.tw，舊版 .aspx UTK0201 流程）launcher 端自動化�
   ibon_auto（bool）、ibon_area_keyword（str）、ibon_exclude_keyword（str）、
   ibon_fallback（bool）、ibon_ticket_count（int）
 """
+import asyncio
 import json
+import random
 import re
 
 # 已處理過的「URL → 避免同頁重複點擊」
@@ -96,10 +98,32 @@ async def _get_rows(tab):
         return []
 
 
-async def _click_selector(tab, selector):
+async def _cdp_move_click(tab, cdp, x, y):
+    """模擬滑鼠移動（隨機起點、2~4 段、每段 110~150ms）後以 CDP 受信任點擊。"""
+    cdp_input = cdp.input_
+    sx = x + random.randint(-140, 140)
+    sy = y + random.randint(-90, 90)
+    steps = random.randint(2, 4)
+    for i in range(1, steps + 1):
+        t = i / steps
+        ease = 2 * t * t if t < 0.5 else -1 + (4 - 2 * t) * t
+        await tab.send(cdp_input.dispatch_mouse_event(
+            type_='mouseMoved', x=sx + (x - sx) * ease, y=sy + (y - sy) * ease, buttons=0))
+        await asyncio.sleep(random.uniform(0.11, 0.15))
+    await tab.send(cdp_input.dispatch_mouse_event(type_='mouseMoved', x=x, y=y, buttons=0))
+    await asyncio.sleep(random.uniform(0.11, 0.15))
+    await tab.send(cdp_input.dispatch_mouse_event(
+        type_='mousePressed', x=x, y=y,
+        button=cdp_input.MouseButton.LEFT, buttons=1, click_count=1))
+    await asyncio.sleep(random.uniform(0.05, 0.09))
+    await tab.send(cdp_input.dispatch_mouse_event(
+        type_='mouseReleased', x=x, y=y,
+        button=cdp_input.MouseButton.LEFT, buttons=1, click_count=1))
+
+
+async def _click_selector(tab, selector, cdp=None):
     """先試 CDP 受信任滑鼠（取中心座標）；取不到座標則退回元素 .click()。"""
-    import json as _json
-    sel = _json.dumps(selector)
+    sel = json.dumps(selector)
     pt = await _eval(tab, '''(() => {
         const el = document.querySelector(%s);
         if (!el) return null;
@@ -118,7 +142,10 @@ async def _click_selector(tab, selector):
         return False
     if isinstance(info, dict) and 'x' in info:
         try:
-            await tab.mouse_click(float(info['x']), float(info['y']))
+            if cdp is not None:
+                await _cdp_move_click(tab, cdp, float(info['x']), float(info['y']))
+            else:
+                await tab.mouse_click(float(info['x']), float(info['y']))
             return True
         except Exception:
             pass
@@ -133,7 +160,7 @@ async def _click_selector(tab, selector):
     return bool(ok)
 
 
-async def _select_area(tab, cfg):
+async def _select_area(tab, cfg, cdp=None):
     url = ''
     try:
         url = tab.url or ''
@@ -177,14 +204,15 @@ async def _select_area(tab, cfg):
     _handled.add(key)
     _log("🎯 [IBON] 鎖定：%s（票價 %s）→ 點擊 area=%s" % (
         target.get('NAME'), target.get('PRICE'), area_id))
-    ok = await _click_selector(tab, 'area[id="%s"]' % area_id)
+    await asyncio.sleep(random.uniform(0.11, 0.15))
+    ok = await _click_selector(tab, 'area[id="%s"]' % area_id, cdp)
     if ok:
         _log("✅ [IBON] 已送出選區（CDP）")
     else:
         _log("⚠ [IBON] area 點擊失敗")
 
 
-async def _set_qty(tab, n):
+async def _set_qty(tab, n, cfg=None, cdp=None):
     res = await _eval(tab, '''(function() {
         try {
             let sel = document.querySelector('select[name*="AMOUNT_DDL"]')
@@ -200,7 +228,41 @@ async def _set_qty(tab, n):
     })()''' % json.dumps(str(n)))
     if res:
         _log("✅ [IBON] 已設定張數：%s" % n)
+        if cfg is None or cfg.get('ibon_auto_next', True):
+            await asyncio.sleep(0.5)
+            await _click_ibon_next(tab, cdp)
     return bool(res)
+
+
+async def _click_ibon_next(tab, cdp=None):
+    """數量設定完成後，送出「下一步」。優先直接呼叫 ASP.NET __doPostBack
+    （合成 click 常只轉圈不送出），再退回 CDP 受信任滑鼠點擊。"""
+    r = await _eval(tab, '''(() => {
+        try {
+            const el = document.querySelector('#ctl00_ContentPlaceHolder1_A2')
+                || Array.from(document.querySelectorAll('a, button, input[type="submit"]'))
+                    .find(e => ((e.innerText || e.value || '').trim() === '下一步'));
+            if (!el) return 'noel';
+            const href = el.getAttribute('href') || '';
+            const m = href.match(/__doPostBack\\('([^']*)','([^']*)'\\)/);
+            const target = m ? m[1] : (el.id || '');
+            if (target && typeof __doPostBack === 'function') {
+                __doPostBack(target, '');
+                return 'postback';
+            }
+            el.click();
+            return 'click';
+        } catch (e) { return 'err'; }
+    })()''')
+    if r in ('postback', 'click'):
+        _log("✅ [IBON] 已送出「下一步」(%s)" % r)
+        return True
+    ok = await _click_selector(tab, '#ctl00_ContentPlaceHolder1_A2', cdp)
+    if ok:
+        _log("✅ [IBON] 已按「下一步」")
+        return True
+    _log("ℹ [IBON] 找不到/無法送出「下一步」按鈕")
+    return False
 
 
 async def step(tab, cfg, cdp=None):
@@ -213,9 +275,9 @@ async def step(tab, cfg, cdp=None):
         return
     if 'orders.ibon.com.tw' in url:
         if 'UTK0201_000' in url:
-            await _select_area(tab, cfg)
+            await _select_area(tab, cfg, cdp)
         elif 'UTK0201_001' in url:
-            await _set_qty(tab, cfg.get('ibon_ticket_count', 1))
+            await _set_qty(tab, cfg.get('ibon_ticket_count', 1), cfg, cdp)
         elif 'UTK0206' in url or 'UTK0201_005' in url:
             pass  # 已到確認/完成頁，交給使用者
         return
@@ -294,7 +356,7 @@ async def _click_node(tab, cdp, node_id):
     c = await _node_center(tab, cdp, node_id)
     if c:
         try:
-            await tab.mouse_click(c[0], c[1])
+            await _cdp_move_click(tab, cdp, c[0], c[1])
             return True
         except Exception:
             pass

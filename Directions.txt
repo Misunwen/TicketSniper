@@ -84,7 +84,8 @@ TicketSniper/
 - 驗證碼長度：通常為 4。
 - 重試次數：辨識長度不符時最多換圖重試次數。
 - 【紀錄（回報用）】啟用除錯紀錄：開啟後記錄自動化過程（預設關）；
-  按「匯出紀錄 (.txt)」可下載成文字檔回報（含版本、時間、網址與設定）。
+  按「匯出紀錄 (.txt)」可下載成文字檔回報（含版本、時間、網址與設定）；
+  按「清除紀錄」可清空已累積的紀錄（不需重整）。
 
 ----------------------------------------
  第四步（可選）：用 nodriver 啟動瀏覽器（全自動）
@@ -129,6 +130,7 @@ TicketSniper/
     .aspx（UTK0201）流程；此時請把擴充功能 popup 的「IBON 自動化」取消，避免重複。
   * ibon_area_keyword / ibon_exclude_keyword / ibon_fallback / ibon_ticket_count：
     IBON 的區域關鍵字（`;`／`,` 備案、空白＝AND）、排除字、找不到時遞補、購買張數。
+  * ibon_auto_next：預設 true。IBON 數量頁設定好張數後自動按「下一步」。
   * ibon_spa_keyword / ibon_spa_query：新版 IBON SPA（closed Shadow DOM）用；
     以 CDP 穿透搜尋可點元素，`ibon_spa_keyword` 指定要點的文字（`;`／`,` 備案），
     `ibon_spa_query` 指定搜尋選擇器。未設定關鍵字時只記錄發現的元素，不會點擊。

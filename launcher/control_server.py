@@ -13,6 +13,7 @@ Input.dispatchMouseEvent 送出「受信任」滑鼠事件（isTrusted 為 true�
 """
 import asyncio
 import json
+import random
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -128,13 +129,27 @@ class ControlServer:
         if cdp is None:
             from nodriver import cdp  # 備援
         cdp_input = cdp.input_
-        await tab.send(cdp_input.dispatch_mouse_event(
-            type_='mouseMoved', x=x, y=y, buttons=0))
-        await tab.sleep(0.03)
+
+        async def move(mx, my):
+            await tab.send(cdp_input.dispatch_mouse_event(
+                type_='mouseMoved', x=mx, y=my, buttons=0))
+
+        # 模擬滑鼠移動：隨機起點、2~4 段、每段 110~150ms
+        sx = x + random.randint(-140, 140)
+        sy = y + random.randint(-90, 90)
+        steps = random.randint(2, 4)
+        for i in range(1, steps + 1):
+            t = i / steps
+            ease = 2 * t * t if t < 0.5 else -1 + (4 - 2 * t) * t
+            await move(sx + (x - sx) * ease, sy + (y - sy) * ease)
+            await asyncio.sleep(random.uniform(0.11, 0.15))
+        await move(x, y)
+        await asyncio.sleep(random.uniform(0.11, 0.15))
+
         await tab.send(cdp_input.dispatch_mouse_event(
             type_='mousePressed', x=x, y=y,
             button=cdp_input.MouseButton.LEFT, buttons=1, click_count=1))
-        await tab.sleep(0.05)
+        await asyncio.sleep(random.uniform(0.05, 0.09))
         await tab.send(cdp_input.dispatch_mouse_event(
             type_='mouseReleased', x=x, y=y,
             button=cdp_input.MouseButton.LEFT, buttons=1, click_count=1))

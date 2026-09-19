@@ -4,6 +4,27 @@
 格式參考 [Keep a Changelog](https://keepachangelog.com/zh-TW/1.1.0/)，
 版本號遵循 [Semantic Versioning](https://semver.org/lang/zh-TW/)。
 
+## [1.4.1] - 2026-09-20
+
+### Added
+- 除錯紀錄：新增「🗑️ 清除紀錄」按鈕（清除 storage 緩衝與頁面內緩衝），避免紀錄一直累積、
+  不必每次重新整理就重新抓。
+- IBON：選完張數後可自動按「下一步」——擴充功能開關 `ibonAutoNext`；
+  launcher 設定 `ibon_auto_next`（舊版 .aspx）。
+
+### Fixed
+- IBON「下一步」程式點擊只會轉圈、postback 沒送出（手動點才正常）。改為：
+  launcher 模式優先 **CDP 受信任點擊**，否則**直接呼叫 ASP.NET `__doPostBack`**
+  （擴充經 MAIN world 橋接、launcher 以 `evaluate`），最後才退回合成 click。
+
+### Changed
+- **擬人化強化**：所有點擊加入**模擬滑鼠移動**（隨機起點、2~4 段貝茲曲線）與
+  **110~150ms 隨機延遲**：
+  - launcher CDP 點擊（`control_server.py` 的受信任點擊、`ibon.py` 的選區/SPA 點擊）。
+  - 擴充功能 `humanClick` 的事件間隔、`clickElement` 點後延遲、IBON 選區點擊前。
+  - KKTIX 連點加票間隔由 10~30ms 改為 **110~150ms**。
+  - 同意條款勾選改為**受信任點擊優先**（再退回原生 `.click()`／setter）。
+
 ## [1.4.0] - 2026-09-20
 
 ### Added

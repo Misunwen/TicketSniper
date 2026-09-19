@@ -38,6 +38,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const areaAutoFallback = $('areaAutoFallback');
     const kktixSeatMode    = $('kktixSeatMode');
     const ibonAuto         = $('ibonAuto');
+    const ibonAutoNext     = $('ibonAutoNext');
     const playSound        = $('playSound');
 
     const serverStatus     = $('serverStatus');
@@ -59,13 +60,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const clearBtn         = $('clearBtn');
     const debugLog         = $('debugLog');
     const exportLogBtn     = $('exportLogBtn');
+    const clearLogBtn      = $('clearLogBtn');
 
     // =========================================
     // 載入設定
     // =========================================
     chrome.storage.local.get([
         'autoCheck', 'autoReload', 'dropdownValue', 'autoClickZone', 'zoneKeywords', 'autoSubmit',
-        'keywordExclude', 'areaSelectMode', 'areaAutoFallback', 'playSound', 'kktixSeatMode', 'ibonAuto',
+        'keywordExclude', 'areaSelectMode', 'areaAutoFallback', 'playSound', 'kktixSeatMode', 'ibonAuto', 'ibonAutoNext',
         'autoFill', 'autoRun', 'yiiHashEnabled', 'serverUrl', 'typingMode', 'captchaLength', 'recognizeTimes',
         'savedSelector', 'debugLog'
     ], (data) => {
@@ -81,6 +83,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (data.playSound !== undefined) playSound.checked = data.playSound;
         kktixSeatMode.value = data.kktixSeatMode || 'none';
         if (data.ibonAuto !== undefined) ibonAuto.checked = data.ibonAuto;
+        if (data.ibonAutoNext !== undefined) ibonAutoNext.checked = data.ibonAutoNext;
 
         if (data.autoFill !== undefined) autoFill.checked = data.autoFill;
         if (data.autoRun !== undefined) autoRun.checked = data.autoRun;
@@ -124,6 +127,7 @@ document.addEventListener('DOMContentLoaded', () => {
     areaAutoFallback.addEventListener('change', () => chrome.storage.local.set({ areaAutoFallback: areaAutoFallback.checked }));
     kktixSeatMode.addEventListener('change', () => chrome.storage.local.set({ kktixSeatMode: kktixSeatMode.value }));
     ibonAuto.addEventListener('change', () => chrome.storage.local.set({ ibonAuto: ibonAuto.checked }));
+    ibonAutoNext.addEventListener('change', () => chrome.storage.local.set({ ibonAutoNext: ibonAutoNext.checked }));
     playSound.addEventListener('change', () => chrome.storage.local.set({ playSound: playSound.checked }));
 
     autoFill.addEventListener('change', () => chrome.storage.local.set({ autoFill: autoFill.checked }));
@@ -195,6 +199,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 a.click();
                 setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
             });
+        });
+    });
+
+    // 清除紀錄（只清 storage 緩衝；新產生的紀錄會重新累積）
+    clearLogBtn.addEventListener('click', () => {
+        chrome.storage.local.remove('tsLogs', () => {
+            if (chrome.runtime.lastError) return;
+            // 一併請目前分頁清空頁面內的緩衝
+            chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+                if (tabs[0]) {
+                    chrome.tabs.sendMessage(tabs[0].id, { action: 'clearLogs' }, () => void chrome.runtime.lastError);
+                }
+            });
+            exportLogBtn.textContent = '🗑️ 已清除紀錄';
+            setTimeout(() => { exportLogBtn.textContent = '💾 匯出紀錄 (.txt)'; }, 1500);
         });
     });
 
