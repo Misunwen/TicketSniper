@@ -4,6 +4,14 @@
 格式參考 [Keep a Changelog](https://keepachangelog.com/zh-TW/1.1.0/)，
 版本號遵循 [Semantic Versioning](https://semver.org/lang/zh-TW/)。
 
+## [1.3.1] - 2026-09-19
+
+### Changed
+- 補充 **IBON 使用說明**：IBON 的售票流程（Cloudflare + Queue-it）會擋啟動器使用的
+  Chrome for Testing / nodriver 環境（出現「連線暫時受限」）。要跑 IBON 請改用
+  `啟動伺服器.bat` + **一般 Chrome 手動載入 extension**，不要用 `啟動瀏覽器.bat`。
+  （實測一般 Chrome + 外掛可正常選位。）已更新 `Directions.txt` 的啟動器章節與常見問題。
+
 ## [1.3.0] - 2026-09-19
 
 ### Added
