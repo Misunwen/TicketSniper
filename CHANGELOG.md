@@ -6,6 +6,18 @@
 
 ## [Unreleased]
 
+### Added
+- `tools/setup_deps.py`，並重寫 `安裝套件.bat`：逐一檢測伺服器／啟動器所需套件，
+  缺少或版本不符者自動 `pip install`（含固定 `ddddocr==1.5.6`）。
+- `打包分享.bat`：打包成 `TicketSniper.zip`（排除 `.git`、`chrome_profile`、
+  Chrome for Testing、`recognition_log*.dat`、`__pycache__`；可選一併打包 CfT）。
+- `server/requirements-build.txt`：把 `pyinstaller` 移出執行時相依。
+- Chrome for Testing 跨平台偵測（win32/win64/mac-x64/mac-arm64/linux64）。
+
+### Changed
+- 啟動器 `.bat` 改為 UTF-8 + `chcp 65001`，中文與 emoji 訊息可正常顯示。
+- OCR 伺服器綁定改為 `127.0.0.1`（僅限本機存取）。
+
 ## [1.1] - 2026-09-19
 
 ### Added

@@ -4,4 +4,3 @@ pillow
 numpy
 # 自訓練 ONNX 模型（server/models）需要 1.5.6 的 custom-model 解碼；1.6.x 不相容
 ddddocr==1.5.6
-pyinstaller==6.5.0

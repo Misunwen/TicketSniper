@@ -1,27 +1,28 @@
 @echo off
-title TicketSniper - ���ҽX���Ѧ��A��
+chcp 65001 >nul
+title TicketSniper - 驗證碼辨識伺服器
 color 0A
 cd /d "%~dp0server"
 echo ===================================================
-echo    TicketSniper ���ҽX���Ѧ��A��
+echo    TicketSniper 驗證碼辨識伺服器
 echo ===================================================
 echo.
 python --version >nul 2>&1
 if %errorlevel% neq 0 (
     color 0C
-    echo [���~] �䤣�� Python�C
-    echo �Х��w�� Python �äĿ� "Add Python to PATH"�C
+    echo [錯誤] 找不到 Python。
+    echo 請先安裝 Python 並勾選 "Add Python to PATH"。
     echo.
     pause
     exit /b
 )
-echo [1/2] �ˬd�æw�˩һݮM��]�Ĥ@���|����[�^...
+echo [1/2] 檢查並安裝所需套件（第一次會比較久）...
 pip install -r requirements.txt -q
-echo       �����C
+echo       完成。
 echo.
-echo [2/2] �Ұʦ��A���A�ЫO���������}�ҡ]�Y�p�Y�i�A�������^...
+echo [2/2] 啟動伺服器，請保持此視窗開啟（縮小即可，勿關閉）...
 echo ===================================================
 python app_en_tixcraft_V3.py
 echo.
-echo ���A���w�����C
+echo 伺服器已結束。
 pause

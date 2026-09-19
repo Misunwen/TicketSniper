@@ -1,0 +1,3 @@
+# 打包 exe（build.spec）才需要；一般執行不必安裝
+-r requirements.txt
+pyinstaller==6.5.0

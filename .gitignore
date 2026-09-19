@@ -12,6 +12,7 @@ __pycache__/
 build/
 dist/
 *.exe
+*.zip
 
 # 辨識紀錄（執行時產生）
 recognition_log.dat
