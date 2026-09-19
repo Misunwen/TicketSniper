@@ -48,6 +48,34 @@ DEFAULTS = {
     "extra_args": []
 }
 
+# 參考 tickets_hunter（MaxBot）經 Cloudflare 驗證的啟動參數：關閉多餘背景服務、
+# 通知、翻譯、同步等，讓瀏覽器環境更接近一般使用者（降低被偵測機率）。
+STEALTH_ARGS = [
+    "--disable-background-networking",
+    "--disable-backgrounding-occluded-windows",
+    "--disable-breakpad",
+    "--disable-component-update",
+    "--disable-default-apps",
+    "--disable-dev-shm-usage",
+    "--disable-domain-reliability",
+    "--disable-infobars",
+    "--disable-notifications",
+    "--disable-popup-blocking",
+    "--disable-renderer-backgrounding",
+    "--disable-session-crashed-bubble",
+    "--disable-smooth-scrolling",
+    "--disable-sync",
+    "--disable-translate",
+    "--hide-crash-restore-bubble",
+    "--no-default-browser-check",
+    "--no-first-run",
+    "--no-pings",
+    "--no-service-autorun",
+    "--password-store=basic",
+    "--lang=zh-TW",
+    "--disable-blink-features=AutomationControlled",
+]
+
 
 def load_config():
     cfg_path = BASE / 'config.json'
@@ -224,15 +252,17 @@ async def main():
     ws = cfg.get('window_size') or []
     if len(ws) == 2:
         args.append(f"--window-size={ws[0]},{ws[1]}")
+    disabled_features = ["TranslateUI"]
     if cfg.get('try_load_extension') and ext.exists():
         args.append(f"--load-extension={ext}")
         if not using_cft:
             # 品牌 Chrome 137+ 的還原開關（Chrome for Testing 不需要）
-            args.append("--disable-features=DisableLoadExtensionCommandLineSwitch")
+            disabled_features.append("DisableLoadExtensionCommandLineSwitch")
     elif cfg.get('try_load_extension'):
         print(f"⚠ 找不到外掛資料夾，略過自動載入：{ext}")
+    args.append("--disable-features=" + ",".join(disabled_features))
+    args += STEALTH_ARGS
     args += list(cfg.get('extra_args') or [])
-    args += ["--no-first-run", "--no-default-browser-check"]
 
     print("=" * 60)
     print(" TicketSniper nodriver 啟動器")

@@ -4,6 +4,23 @@
 格式參考 [Keep a Changelog](https://keepachangelog.com/zh-TW/1.1.0/)，
 版本號遵循 [Semantic Versioning](https://semver.org/lang/zh-TW/)。
 
+## [1.2.1] - 2026-09-19
+
+### Changed
+- 移除 MAIN world 反偵測腳本（覆寫 `isTrusted`／`addEventListener`）與 `#bot-hud` DOM。
+  這類覆寫本身是常見的機器人指紋：把 `isTrusted` 強制為 `true` 會被頁面用一個合成事件
+  直接測出，覆寫 `addEventListener` 也會因函式特徵不同而被辨識。
+- 頁面日誌預設靜音（`TS_DEBUG = false`）：不輸出 console、不插入任何 DOM。
+- ibon 橋接只在 `UTK0201` 頁面注入（不再於整個 ibon 網域），改用每次載入隨機 token，
+  並以 `event.source === window` 驗證來源。
+- 移除 `patchIbonErrors` 對 `console.error` 的覆寫；必要隱藏元素只在 UTK 頁面建立。
+- 啟動器加入參考 `tickets_hunter`（MaxBot）的隱蔽啟動參數：關閉背景網路／通知／同步／
+  翻譯、`--no-pings`、`--disable-blink-features=AutomationControlled` 等。
+
+### Notes
+- 擴充功能以合成 DOM 事件操作，`isTrusted` 本質為 `false`，進階防護仍可能偵測。
+  若目標平台防護嚴格，建議改用 nodriver/CDP 的受信任輸入（作法參考 `tickets_hunter`）。
+
 ## [1.2] - 2026-09-19
 
 ### Added

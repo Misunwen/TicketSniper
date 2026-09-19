@@ -1,21 +1,24 @@
 // =========================================================================
-// 🔺 第一行就執行：inject.js 注入（必須在任何邏輯之前）
+// 🔺 只在真正需要橋接的 ibon UTK 頁面注入 inject.js（不在整個 ibon 網域執行）
 // =========================================================================
+// 除錯開關：預設關閉。日誌只留在擴充功能的隔離世界（頁面讀不到），
+// 不輸出 console、不插入任何 DOM，避免留下可被偵測的痕跡。
+const TS_DEBUG = false;
+window.botLogs = [];
+
+// 每次載入隨機產生的橋接 token（取代固定字串，避免被頁面監聽辨識）
+const IBON_BRIDGE_TOKEN = '__ts_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+
 function injectScript() {
     try {
         let s = document.createElement('script');
         s.src = chrome.runtime.getURL('inject.js');
+        s.dataset.tsToken = IBON_BRIDGE_TOKEN;
         s.onload = function() { this.remove(); };
         (document.head || document.documentElement).appendChild(s);
-        console.info('✅ inject.js 注入成功');
-    } catch(e) {
-        console.error('inject 失敗:', e);
-    }
+    } catch(e) {}
 }
-if (
-    window.location.hostname.includes('ibon') ||
-    window.location.href.includes('UTK0201')
-) {
+if (window.location.href.includes('UTK0201')) {
     if (document.documentElement) {
         injectScript();
     } else {
@@ -38,7 +41,6 @@ function stopAllScanners() {
 // =========================================================================
 // 🛠️ 共通武器庫（只定義一次）
 // =========================================================================
-window.botLogs = [];
 
 // ① 最底層工具（無依賴）
 function randInt(min, max) { 
@@ -62,57 +64,18 @@ function normalizeText(str) {
         .trim();
 }
 
-// ③ HUD 顯示
-function updateHUD(msg) {
-    try {
-        let container = document.body || document.documentElement;
-        if (!container) return;
-        let hud = document.getElementById('bot-hud');
-        if (!hud) {
-            hud = document.createElement('div');
-            hud.id = 'bot-hud';
-            hud.style.cssText = [
-                'position:fixed', 'bottom:10px', 'left:10px', 'background:rgba(0,0,0,0.85)', 'color:#0f0',
-                'padding:10px 14px', 'font-size:13px', 'z-index:2147483647', 'border-radius:6px', 'pointer-events:none',
-                'font-family:monospace', 'font-weight:bold', 'border:1px solid #0f0', 'max-width:420px', 'word-break:break-all'
-            ].join(';');
-            container.appendChild(hud);
-        } else if (!container.contains(hud)) {
-            container.appendChild(hud);
-        }
-        hud.innerText = msg;
-    } catch (e) {}
-}
-
-// ✅ HUD 節流（避免高頻掃描時反覆寫入 DOM）
-let _hudTimer = null;
-let _hudLatest = '';
-function updateHUDThrottled(msg) {
-    _hudLatest = msg;
-    if (_hudTimer) return;
-    _hudTimer = setTimeout(function() {
-        _hudTimer = null;
-        updateHUD(_hudLatest);
-    }, 100);
-}
-
-// ✅ 擴展日誌輸出
+// ③ 日誌輸出（預設靜音；僅在除錯時輸出 console）
 function extLog(message) {
     let time = new Date().toLocaleTimeString('zh-TW', {
         hour12: false,
         fractionalSecondDigits: 3
     });
     let fullMsg = `[${time}] ${message}`;
-    console.info(
-        `%c🤖 TicketSniper %c ${fullMsg}`,
-        'background: #00ff00; color: #000; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 12px;',
-        'color: #00ff00; font-weight: bold; font-size: 12px; background: #222; padding: 2px 6px; border-radius: 4px;'
-    );
     window.botLogs.push(fullMsg);
     if (window.botLogs.length > 500) {
         window.botLogs.splice(0, window.botLogs.length - 500);
     }
-    updateHUDThrottled(fullMsg);
+    if (TS_DEBUG) console.info('[TicketSniper]', fullMsg);
 }
 
 // ⓪ 反偵測注入（extLog 定義後才執行）
@@ -272,7 +235,7 @@ function makeIrregularInterval(callback, baseMs, jitterMs) {
             try { 
                 await callback(); 
             } catch(e) { 
-                console.error(e); 
+                if (TS_DEBUG) console.error(e); 
             }
             next();
         }, delay);
@@ -747,25 +710,18 @@ function callSend(actionStr) {
     let script = actionStr.replace(/^javascript:/i, '').trim();
     extLog(`🚀 [IBON] 靜態地圖橋接：${script.slice(0, 60)}`);
     window.postMessage({
-        type: '__BOT_IBON__',
+        type: IBON_BRIDGE_TOKEN,
         script: script
     }, '*');
     return true;
 }
 
 function patchIbonErrors() {
+    // 僅在 ibon UTK 選位頁面處理；不在整個 ibon 網域留下任何 DOM 變更
+    if (!window.location.href.includes('UTK0201')) return;
     if (window.__patchedIbonErrors) return;
     window.__patchedIbonErrors = true;
-    
-    let originalConsoleError = console.error;
-    console.error = function(...args) {
-        let msg = args[0] ? args[0].toString() : '';
-        if (msg.includes('Cannot read') || msg.includes('undefined')) {
-            return;
-        }
-        originalConsoleError.apply(console, args);
-    };
-    
+
     try {
         let container = document.body || document.documentElement;
         if (!container) return;
@@ -1880,7 +1836,7 @@ function convertImageToBase64(captchaImg, callback) {
             ctx.drawImage(img, 0, 0);
             callback(canvas.toDataURL('image/png'));
         } catch (e) {
-            console.warn('[TicketSniper] canvas 轉換失敗:', e);
+            if (TS_DEBUG) console.warn('[TicketSniper] canvas 轉換失敗:', e);
             callback(null);
         }
     };
