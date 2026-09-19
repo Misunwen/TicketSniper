@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "TicketSniper 搶票狙擊手",
-  "version": "1.0",
+  "version": "1.1",
   "description": "整合自動點擊搶票與地端 AI 驗證碼辨識（tixcraft / kktix / ibon）",
   "icons": {
     "16": "icon.png",

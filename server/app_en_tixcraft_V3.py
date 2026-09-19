@@ -12,6 +12,14 @@ from io import BytesIO
 from PIL import Image, ImageOps, ImageStat, ImageFilter
 from itertools import combinations
 import numpy as np
+import sys
+
+# 讓 emoji / 中文輸出不受主控台編碼影響（cp950 會讓 print 丟例外）
+try:
+    sys.stdout.reconfigure(encoding='utf-8')
+    sys.stderr.reconfigure(encoding='utf-8')
+except Exception:
+    pass
 
 APP_VERSION = '45.0'
 MAX_IMAGE_BYTES = 4 * 1024 * 1024  # 單張圖片大小上限 4MB
@@ -125,6 +133,92 @@ def ocr_classify(img_bytes):
     try:
         return ocr.classification(img_bytes), 1.0
     except Exception:
+        return '', 0.0
+
+
+# ==========================================
+# 🧠 自訓練 ONNX 模型（參考 bouob/tickets_hunter, GPL-3.0）
+# 目錄：server/models/{tixcraft_tm,universal}
+#   tixcraft_tm：tixcraft / indievox / ticketmaster 家族，純小寫 a-z
+#   universal  ：通用（數字+大小寫英文）
+# 找不到模型時自動回退下方多策略投票。
+# ==========================================
+MODEL_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models')
+MODEL_NAME_MAP = {
+    'tixcraft': 'tixcraft_tm',
+    'tixcraft_tm': 'tixcraft_tm',
+    'indievox': 'tixcraft_tm',
+    'ticketmaster': 'tixcraft_tm',
+    'universal': 'universal',
+}
+_custom_ocr_cache = {}
+_custom_ocr_lock = threading.Lock()
+_ddddocr_custom_support = None
+
+
+def _ddddocr_supports_custom():
+    """這些 custom.onnx 的輸出是 int64 索引，需 ddddocr 1.5.x 解碼；
+    ddddocr 1.6+（有 compat 模組）會做 argmax 而得到錯誤結果，故停用。"""
+    global _ddddocr_custom_support
+    if _ddddocr_custom_support is None:
+        try:
+            import ddddocr.compat  # noqa: F401  (僅 1.6+ 存在)
+            print("⚠ 偵測到 ddddocr 1.6+，與自訓練模型不相容；請安裝 requirements 的 ddddocr==1.5.6")
+            _ddddocr_custom_support = False
+        except Exception:
+            _ddddocr_custom_support = True
+    return _ddddocr_custom_support
+
+
+def get_custom_ocr(model_key):
+    """依 model_key 取得（並快取）自訓練 ddddocr 實例；無對應模型回傳 None。"""
+    model_name = MODEL_NAME_MAP.get((model_key or '').strip().lower())
+    if not model_name:
+        return None
+    if not _ddddocr_supports_custom():
+        return None
+    with _custom_ocr_lock:
+        if model_name in _custom_ocr_cache:
+            return _custom_ocr_cache[model_name]
+        onnx_path = os.path.join(MODEL_DIR, model_name, 'custom.onnx')
+        charsets_path = os.path.join(MODEL_DIR, model_name, 'charsets.json')
+        obj = None
+        if os.path.exists(onnx_path) and os.path.exists(charsets_path):
+            try:
+                obj = ddddocr.DdddOcr(
+                    det=False, ocr=False, show_ad=False,
+                    import_onnx_path=onnx_path,
+                    charsets_path=charsets_path
+                )
+                print(f"✅ 載入自訓練模型：{model_name}")
+            except Exception as e:
+                print(f"⚠ 自訓練模型載入失敗 ({model_name}): {e}")
+                obj = None
+        else:
+            print(f"ℹ 找不到自訓練模型，回退策略投票：{onnx_path}")
+        _custom_ocr_cache[model_name] = obj
+        return obj
+
+
+def custom_ocr_classify(ocr_obj, img_bytes, model_name):
+    """自訓練模型辨識（直接吃原始圖片 bytes，無需前處理）。"""
+    try:
+        res = ocr_obj.classification(img_bytes)
+        if isinstance(res, dict):
+            text = res.get('text') or ''
+            conf = res.get('confidence', 1.0)
+            try:
+                conf = float(conf)
+            except (TypeError, ValueError):
+                conf = 1.0
+        else:
+            text, conf = (res or ''), 1.0
+        text = (text or '').strip()
+        if model_name == 'tixcraft_tm':
+            text = text.lower()
+        return text, max(0.0, min(1.0, conf))
+    except Exception as e:
+        print(f"⚠ 自訓練模型辨識失敗: {e}")
         return '', 0.0
 
 
@@ -829,7 +923,30 @@ def position_vote(results, expected_length):
 
 
 def recognize_core(original_rgb, base_img, expected_length,
-                   current_round=1, recognize_times_total=1):
+                   current_round=1, recognize_times_total=1,
+                   custom_ocr=None, raw_bytes=None, custom_model_name=None):
+    # ① 自訓練模型優先（raw bytes，無需前處理）
+    if custom_ocr is not None and raw_bytes is not None:
+        try:
+            text, conf = custom_ocr_classify(custom_ocr, raw_bytes, custom_model_name or '')
+            if text:
+                print(f"\n🧠 自訓練模型 [{custom_model_name}] → '{text}' (len={len(text)}, conf={conf:.2f})")
+                if not expected_length or len(text) == expected_length:
+                    return {
+                        'success': True,
+                        'text': text,
+                        'method': 'custom',
+                        'votes': {text: round(conf, 2)},
+                        'top3': [[text, round(conf, 2)]],
+                        'strategies': f"[{custom_model_name}]={text}",
+                        'total_strategies': 1,
+                        'winner_votes': round(conf, 2),
+                        'version': APP_VERSION,
+                    }
+                print(f"   ↳ 長度不符（期望 {expected_length}），改用多策略投票")
+        except Exception as e:
+            print(f"⚠ 自訓練模型流程失敗: {e}")
+
     strategies = build_strategies(expected_length)
     print(f"\n{'='*60}")
     print(f"🚀 Captcha Sniper V{APP_VERSION} | 預期長度：{expected_length} | 策略數：{len(strategies)}")
@@ -907,6 +1024,7 @@ def recognize_captcha():
         expected_length = data.get('length') or 4
         recognize_times_total = data.get('recognizeTimes', 1)
         current_round = data.get('currentRound', 1)
+        model_key = str(data.get('model') or '').strip().lower()
         try:
             yii_hash = int(data.get('yiiHash') or 0)
         except (TypeError, ValueError):
@@ -922,7 +1040,7 @@ def recognize_captcha():
 
         # 快取：同一張圖 + 相同長度 + 相同 hash，直接回傳上次結果
         cache_key = hashlib.sha256(
-            f"{expected_length}|{yii_hash}|".encode('utf-8') + image_data.encode('utf-8', 'ignore')
+            f"{expected_length}|{model_key}|{yii_hash}|".encode('utf-8') + image_data.encode('utf-8', 'ignore')
         ).hexdigest()
         cached = cache_get(cache_key)
         if cached is not None:
@@ -951,6 +1069,10 @@ def recognize_captcha():
             original_rgb = original_image.convert('RGB')
         base_img = standardize_captcha_image(original_rgb)
 
+        # 依平台挑選自訓練模型（無對應或檔案缺失則 None → 策略投票）
+        custom_ocr = get_custom_ocr(model_key)
+        custom_model_name = MODEL_NAME_MAP.get(model_key)
+
         # 單飛鎖：同圖併發時只計算一次，其餘請求等待後取快取
         lock = get_key_lock(cache_key)
         with lock:
@@ -958,7 +1080,10 @@ def recognize_captcha():
             if payload is None:
                 payload = recognize_core(
                     original_rgb, base_img, expected_length,
-                    current_round, recognize_times_total
+                    current_round, recognize_times_total,
+                    custom_ocr=custom_ocr,
+                    raw_bytes=image_bytes,
+                    custom_model_name=custom_model_name
                 )
                 if payload is None:
                     return jsonify({'success': False, 'error': '所有策略均失敗'}), 500

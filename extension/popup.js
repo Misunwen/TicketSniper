@@ -30,6 +30,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const dropdownValue    = $('dropdownValue');
     const autoClickZone    = $('autoClickZone');
     const zoneKeywords     = $('zoneKeywords');
+    const keywordExclude   = $('keywordExclude');
+    const areaSelectMode   = $('areaSelectMode');
+    const areaAutoFallback = $('areaAutoFallback');
+    const playSound        = $('playSound');
 
     const serverStatus     = $('serverStatus');
     const hashStatus       = $('hashStatus');
@@ -54,6 +58,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // =========================================
     chrome.storage.local.get([
         'autoCheck', 'autoReload', 'dropdownValue', 'autoClickZone', 'zoneKeywords', 'autoSubmit',
+        'keywordExclude', 'areaSelectMode', 'areaAutoFallback', 'playSound',
         'autoFill', 'autoRun', 'yiiHashEnabled', 'serverUrl', 'typingMode', 'captchaLength', 'recognizeTimes',
         'savedSelector'
     ], (data) => {
@@ -63,6 +68,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (data.autoClickZone !== undefined) autoClickZone.checked = data.autoClickZone;
         if (data.zoneKeywords !== undefined) zoneKeywords.value = data.zoneKeywords;
         if (data.autoSubmit !== undefined) autoSubmit.checked = data.autoSubmit;
+        keywordExclude.value = data.keywordExclude || '輪椅;身障;身心;障礙;Restricted View;燈柱遮蔽;視線不完整';
+        areaSelectMode.value = data.areaSelectMode || 'from top to bottom';
+        if (data.areaAutoFallback !== undefined) areaAutoFallback.checked = data.areaAutoFallback;
+        if (data.playSound !== undefined) playSound.checked = data.playSound;
 
         if (data.autoFill !== undefined) autoFill.checked = data.autoFill;
         if (data.autoRun !== undefined) autoRun.checked = data.autoRun;
@@ -95,6 +104,15 @@ document.addEventListener('DOMContentLoaded', () => {
     dropdownValue.addEventListener('change', () => chrome.storage.local.set({ dropdownValue: dropdownValue.value }));
     autoClickZone.addEventListener('change', () => chrome.storage.local.set({ autoClickZone: autoClickZone.checked }));
     autoSubmit.addEventListener('change', () => chrome.storage.local.set({ autoSubmit: autoSubmit.checked }));
+
+    let exclTimer = null;
+    keywordExclude.addEventListener('input', () => {
+        clearTimeout(exclTimer);
+        exclTimer = setTimeout(() => chrome.storage.local.set({ keywordExclude: keywordExclude.value }), 400);
+    });
+    areaSelectMode.addEventListener('change', () => chrome.storage.local.set({ areaSelectMode: areaSelectMode.value }));
+    areaAutoFallback.addEventListener('change', () => chrome.storage.local.set({ areaAutoFallback: areaAutoFallback.checked }));
+    playSound.addEventListener('change', () => chrome.storage.local.set({ playSound: playSound.checked }));
 
     autoFill.addEventListener('change', () => chrome.storage.local.set({ autoFill: autoFill.checked }));
     yiiHashEnabled.addEventListener('change', () => {

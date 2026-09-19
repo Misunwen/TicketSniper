@@ -1,3 +1,6 @@
+# 第三方參考專案（不納入本專案版控）
+tickets_hunter-main/
+
 # Python
 __pycache__/
 *.py[cod]

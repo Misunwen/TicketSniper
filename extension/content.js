@@ -353,6 +353,88 @@ async function triggerAutoReload(autoReloadOpt) {
 }
 
 // =========================================================================
+// 🎯 關鍵字引擎（參考 tickets_hunter）
+//   - `;` 或 `,` 分組 = OR，由左至右優先；同一組內「空白」= AND
+//   - 排除字（黑名單）先過濾；支援選區順序模式與找不到時自動遞補
+// =========================================================================
+const DEFAULT_EXCLUDE_KEYWORDS = '輪椅;身障;身心;障礙;Restricted View;燈柱遮蔽;視線不完整';
+const SOLD_OUT_KEYWORDS = ['售完', '已售完', '選購一空', 'sold out', 'soldout', 'no tickets',
+    'no tickets available', '暫無票', '暫無票券', '空席なし', '完売'];
+const NOT_OPEN_KEYWORDS = ['未開賣', '尚未開賣', '尚未開始', '即將開賣', 'not started',
+    'not yet', '尚未開放', '尚未販售', 'coming soon'];
+
+function parseKeywordGroups(str) {
+    if (!str) return [];
+    let s = String(str).trim();
+    if (!s) return [];
+    if (s.startsWith('[')) {
+        try {
+            let arr = JSON.parse(s);
+            if (Array.isArray(arr)) return arr.map(x => String(x)).filter(x => x.trim());
+        } catch (e) {}
+    }
+    return s.split(/[;,，]/).map(x => x.trim()).filter(Boolean);
+}
+
+function matchTextAllTerms(text, group) {
+    if (!text) return false;
+    let terms = String(group).split(/\s+/).filter(Boolean);
+    if (terms.length === 0) return true;
+    let t = normalizeText(text);
+    return terms.every(term => t.includes(normalizeText(term)));
+}
+
+function isExcludedText(text, excludeGroups) {
+    if (!text || !excludeGroups || excludeGroups.length === 0) return false;
+    return excludeGroups.some(g => matchTextAllTerms(text, g));
+}
+
+function isUnavailableText(text) {
+    if (!text) return true;
+    let t = normalizeText(text);
+    if (SOLD_OUT_KEYWORDS.some(k => t.includes(normalizeText(k)))) return true;
+    if (NOT_OPEN_KEYWORDS.some(k => t.includes(normalizeText(k)))) return true;
+    return false;
+}
+
+function selectIndexByMode(len, mode) {
+    if (len <= 0) return -1;
+    switch (String(mode || '').replace(/_/g, ' ').toLowerCase()) {
+        case 'from bottom to top': return len - 1;
+        case 'center': return Math.floor(len / 2);
+        case 'random': return randInt(0, len - 1);
+        default: return 0; // from top to bottom
+    }
+}
+
+// =========================================================================
+// 🔊 成功提示音（WebAudio，無需音檔）
+// =========================================================================
+let _audioCtx = null;
+function playBeep(type) {
+    if (!window.__tsPlaySound) return;
+    try {
+        _audioCtx = _audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+        const ctx = _audioCtx;
+        const seq = type === 'order' ? [784, 1175] : [880];
+        let t0 = ctx.currentTime;
+        seq.forEach(freq => {
+            const o = ctx.createOscillator();
+            const g = ctx.createGain();
+            o.type = 'sine';
+            o.frequency.value = freq;
+            o.connect(g); g.connect(ctx.destination);
+            g.gain.setValueAtTime(0.0001, t0);
+            g.gain.exponentialRampToValueAtTime(0.25, t0 + 0.02);
+            g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.22);
+            o.start(t0);
+            o.stop(t0 + 0.24);
+            t0 += 0.16;
+        });
+    } catch (e) {}
+}
+
+// =========================================================================
 // 🟠 IBON 專用函數
 // =========================================================================
 
@@ -1251,6 +1333,9 @@ function runTixCraft(settings) {
     const zoneKeywords = settings.zoneKeywords || "";
     const autoReload = settings.autoReload === true;
     const autoSubmit = settings.autoSubmit === true;
+    const keywordExclude = settings.keywordExclude || DEFAULT_EXCLUDE_KEYWORDS;
+    const areaSelectMode = settings.areaSelectMode || 'from top to bottom';
+    const areaAutoFallback = settings.areaAutoFallback === true;
     
     let attempts = 0;
     let isStopped = false;
@@ -1262,11 +1347,11 @@ function runTixCraft(settings) {
     function isSoldOut(el) {
         if (!el) return true;
         let text = normalizeText(el.innerText + ' ' + (el.getAttribute('title') || '') + ' ' + (el.getAttribute('alt') || ''));
-        if (text.includes('售完') || text.includes('soldout') || text.includes('noseat')) return true;
+        if (isUnavailableText(text) || text.includes('noseat')) return true;
         let parent = el.closest('li, td, div, span');
         if (parent) {
             let parentText = normalizeText(parent.innerText);
-            if (parentText.includes('售完') || parentText.includes('soldout')) return true;
+            if (isUnavailableText(parentText)) return true;
             let parentClass = normalizeText(parent.className || '');
             if (parentClass.includes('soldout') || parentClass.includes('disabled') || parentClass.includes('full')) return true;
         }
@@ -1337,11 +1422,10 @@ function runTixCraft(settings) {
                         return;
                     }
                     
-                    if (zoneKeywords) {
-                        let keywords = zoneKeywords.split(/,|，/)
-                            .map(k => normalizeText(k.trim()))
-                            .filter(k => k.length > 0);
-                        
+                    if (zoneKeywords || areaAutoFallback) {
+                        const excludeGroups = parseKeywordGroups(keywordExclude);
+                        const groups = parseKeywordGroups(zoneKeywords);
+
                         const ZONE_SELECTORS = [
                             '.zone-area a', '.area-list a',
                             '[class*="zone"] a', '[class*="area"] a',
@@ -1350,7 +1434,7 @@ function runTixCraft(settings) {
                             'map area[href]',
                             'a[href*="/ticket/"]',
                         ];
-                        
+
                         let linkSet = new Set();
                         let links = [];
                         for (let sel of ZONE_SELECTORS) {
@@ -1360,32 +1444,45 @@ function runTixCraft(settings) {
                                 });
                             } catch(e) {}
                         }
-                        
+
                         if (links.length !== lastLinkCount) {
                             lastLinkCount = links.length;
                             extLog(`🔍 [拓元] 共掃到 ${links.length} 個連結`);
                         }
-                        
+
                         if (links.length > 0) {
-                            let matchedLinks = [];
+                            let candidates = [];
                             for (let link of links) {
                                 if (isSoldOut(link)) continue;
-                                let text = normalizeText(link.innerText + ' ' + (link.getAttribute('title') || ''));
-                                let kwIndex = -1;
-                                for (let i = 0; i < keywords.length; i++) {
-                                    if (matchKeywordNormalized(text, keywords[i])) { kwIndex = i; break; }
+                                let text = link.innerText + ' ' + (link.getAttribute('title') || '');
+                                if (isExcludedText(text, excludeGroups)) {
+                                    extLog(`🚫 [拓元] 排除：${normalizeText(text).slice(0, 40)}`);
+                                    continue;
                                 }
-                                if (kwIndex !== -1) matchedLinks.push({ link, kwIndex, text });
+                                candidates.push({ link, text });
                             }
-                            
-                            matchedLinks.sort((a, b) => a.kwIndex - b.kwIndex);
-                            
+
+                            let matchedLinks = [];
+                            for (let gi = 0; gi < groups.length && matchedLinks.length === 0; gi++) {
+                                for (let c of candidates) {
+                                    if (matchTextAllTerms(c.text, groups[gi])) {
+                                        matchedLinks.push({ link: c.link, kwIndex: gi, text: c.text });
+                                    }
+                                }
+                            }
+
+                            if (matchedLinks.length === 0 && areaAutoFallback && candidates.length > 0) {
+                                extLog('⏳ [拓元] 關鍵字未命中，啟用自動遞補（依選區順序）');
+                                matchedLinks = candidates.map(c => ({ link: c.link, kwIndex: 999, text: c.text }));
+                            }
+
                             if (matchedLinks.length > 0) {
                                 matchedLinks.forEach((item, i) => {
-                                    extLog(`🏷️ 候選第${i+1}名 [KW順序:${item.kwIndex}]：${item.link.innerText.trim().slice(0, 50)}`);
+                                    extLog(`🏷️ 候選第${i+1}名 [KW:${item.kwIndex}]：${normalizeText(item.text).slice(0, 50)}`);
                                 });
-                                let best = matchedLinks[0];
-                                extLog(`🎯 [拓元] 鎖定區域: ${best.link.innerText.trim()}，仿生點擊！`);
+                                let best = matchedLinks[selectIndexByMode(matchedLinks.length, areaSelectMode)];
+                                extLog(`🎯 [拓元] 鎖定區域: ${best.link.innerText.trim().slice(0, 50)}（${areaSelectMode}），仿生點擊！`);
+                                playBeep('found');
                                 localIsClicking = true;
                                 isStopped = true;
                                 await humanClick(best.link);
@@ -1434,6 +1531,9 @@ function runKKTIX(settings) {
     const autoClickZone = settings.autoClickZone === true;
     const zoneKeywords = settings.zoneKeywords || "";
     const autoReload = settings.autoReload === true;
+    const keywordExclude = settings.keywordExclude || DEFAULT_EXCLUDE_KEYWORDS;
+    const areaSelectMode = settings.areaSelectMode || 'from top to bottom';
+    const areaAutoFallback = settings.areaAutoFallback === true;
     
     let attempts = 0;
     let isStopped = false;
@@ -1509,36 +1609,43 @@ function runKKTIX(settings) {
                     }
                     
                     let targetUnit = null;
-                    if (zoneKeywords) {
-                        let keywords = zoneKeywords.split(/,|，/)
-                            .map(k => normalizeText(k.trim()))
-                            .filter(k => k.length > 0);
-                        
-                        let matchedUnits = [];
+                    if (zoneKeywords || areaAutoFallback) {
+                        const excludeGroups = parseKeywordGroups(keywordExclude);
+                        const groups = parseKeywordGroups(zoneKeywords);
+
+                        let candidates = [];
                         for (let unit of availableUnits) {
                             let nameEl = unit.querySelector('.ticket-name');
-                            let nameText = nameEl ? normalizeText(nameEl.innerText) : normalizeText(unit.innerText);
-                            let price = extractPrice(unit);
-                            let kwIndex = -1;
-                            for (let i = 0; i < keywords.length; i++) {
-                                let matchName = matchKeywordNormalized(nameText, keywords[i]);
-                                let nkw = keywords[i].replace(/[^0-9]/g, '');
-                                let matchPrice = nkw !== '' && price === parseInt(nkw);
-                                if (matchName || matchPrice) { kwIndex = i; break; }
+                            let nameText = nameEl ? nameEl.innerText : unit.innerText;
+                            if (isExcludedText(nameText, excludeGroups)) {
+                                extLog(`🚫 [KKTIX] 排除：${normalizeText(nameText).slice(0, 40)}`);
+                                continue;
                             }
-                            if (kwIndex === -1) continue;
-                            matchedUnits.push({ unit, kwIndex, price, text: nameText });
+                            candidates.push({ unit, nameText, price: extractPrice(unit) });
                         }
-                        
+
+                        let matchedUnits = [];
+                        for (let gi = 0; gi < groups.length && matchedUnits.length === 0; gi++) {
+                            let nkwDigits = normalizeText(groups[gi]).replace(/[^0-9]/g, '');
+                            for (let c of candidates) {
+                                let matchName = matchTextAllTerms(c.nameText, groups[gi]);
+                                let matchPrice = nkwDigits !== '' && /^\d+$/.test(nkwDigits) && c.price === parseInt(nkwDigits);
+                                if (matchName || matchPrice) {
+                                    matchedUnits.push({ unit: c.unit, kwIndex: gi, price: c.price, text: normalizeText(c.nameText) });
+                                }
+                            }
+                        }
+
+                        if (matchedUnits.length === 0 && areaAutoFallback && candidates.length > 0) {
+                            extLog('⏳ [KKTIX] 關鍵字未命中，啟用自動遞補');
+                            matchedUnits = candidates.map(c => ({ unit: c.unit, kwIndex: 999, price: c.price, text: normalizeText(c.nameText) }));
+                        }
+
                         if (matchedUnits.length > 0) {
-                            matchedUnits.sort((a, b) => {
-                                if (a.kwIndex !== b.kwIndex) return a.kwIndex - b.kwIndex;
-                                return b.price - a.price;
-                            });
                             matchedUnits.forEach((item, i) => {
                                 extLog(`🏷️ 候選第${i+1}名 [KW:${item.kwIndex} 票價:${item.price}]：${item.text.slice(0, 50)}`);
                             });
-                            targetUnit = matchedUnits[0].unit;
+                            targetUnit = matchedUnits[selectIndexByMode(matchedUnits.length, areaSelectMode)].unit;
                         } else {
                             if (!isWaitingLogShown) {
                                 extLog('⏳ [KKTIX] 關鍵字尚未命中，繼續等待...');
@@ -1567,6 +1674,7 @@ function runKKTIX(settings) {
                             let label = nameEl ? nameEl.innerText.trim() : '?';
                             let price = extractPrice(targetUnit);
                             extLog(`🎯 [KKTIX] 鎖定：${label}（TWD$${price}），連點 ${dropdownValue} 張...`);
+                            playBeep('found');
                             for (let i = 0; i < dropdownValue; i++) {
                                 await humanClick(plusBtn);
                                 if (i < dropdownValue - 1) {
@@ -1606,7 +1714,8 @@ function startAutoFill() {
     stopAllScanners();
     
     chrome.storage.local.get(
-        ['autoCheck', 'autoReload', 'dropdownValue', 'autoClickZone', 'zoneKeywords', 'autoSubmit'],
+        ['autoCheck', 'autoReload', 'dropdownValue', 'autoClickZone', 'zoneKeywords', 'autoSubmit',
+         'keywordExclude', 'areaSelectMode', 'areaAutoFallback', 'playSound'],
         function(data) {
             let raw = data || {};
             let toBool = v => v === true || v === 'true';
@@ -1615,12 +1724,19 @@ function startAutoFill() {
                 autoReload: toBool(raw.autoReload),
                 autoClickZone: toBool(raw.autoClickZone),
                 autoSubmit: toBool(raw.autoSubmit),
+                areaAutoFallback: toBool(raw.areaAutoFallback),
+                playSound: toBool(raw.playSound),
                 dropdownValue: raw.dropdownValue || "none",
-                zoneKeywords: raw.zoneKeywords || ""
+                zoneKeywords: raw.zoneKeywords || "",
+                keywordExclude: raw.keywordExclude || DEFAULT_EXCLUDE_KEYWORDS,
+                areaSelectMode: raw.areaSelectMode || "from top to bottom"
             };
+
+            window.__tsPlaySound = settings.playSound;
+            window.__tsSubmitted = false;
             
             extLog(`🚀 [路由] 平台：${platform}`);
-            extLog(`🚀 [路由] 設定：autoCheck=${settings.autoCheck}, autoReload=${settings.autoReload}, autoClickZone=${settings.autoClickZone}`);
+            extLog(`🚀 [路由] 設定：autoCheck=${settings.autoCheck}, autoReload=${settings.autoReload}, autoClickZone=${settings.autoClickZone}, mode=${settings.areaSelectMode}`);
             
             if (platform === 'TIXCRAFT') runTixCraft(settings);
             else if (platform === 'KKTIX') runKKTIX(settings);
@@ -1691,6 +1807,11 @@ function captchaPresent() {
 // 驗證碼模組僅在拓元 (Yii2) 啟用；KKTIX / ibon 無驗證碼，不處理
 function isCaptchaPlatform() {
     try { return detectPlatform() === 'TIXCRAFT'; } catch (e) { return false; }
+}
+
+// 回傳伺服器要用的自訓練模型鍵
+function captchaModelForPlatform() {
+    try { return detectPlatform() === 'TIXCRAFT' ? 'tixcraft' : 'universal'; } catch (e) { return 'tixcraft'; }
 }
 
 function storageGet(keys) {
@@ -1955,12 +2076,30 @@ function clickSubmitButton() {
     try { btn.click(); return true; } catch (e) { return false; }
 }
 
+// 送出前就緒檢查（參考 tickets_hunter：驗證碼/票數/同意皆就緒才送出）
+function isSubmitReady() {
+    let cap = document.querySelector('#TicketForm_verifyCode');
+    if (cap && cap.offsetParent !== null && (cap.value || '').length < 4) return false;
+    let agree = document.querySelector('#TicketForm_agree, #agree');
+    if (agree && !agree.checked) return false;
+    let qtySelects = Array.from(document.querySelectorAll('select')).filter(isQuantitySelect);
+    if (qtySelects.length > 0 && !qtySelects.some(sel => parseInt(sel.value) > 0)) return false;
+    return true;
+}
+
 async function maybeAutoSubmit() {
     if (window.__tsSubmitted) return;
     const d = await storageGet(['autoSubmit']);
     if (!(d.autoSubmit === true || d.autoSubmit === 'true')) return;
+    if (!isSubmitReady()) {
+        extLog('⏳ 送出前檢查未通過（驗證碼／票數／同意），暫不送出');
+        return;
+    }
     window.__tsSubmitted = clickSubmitButton();
-    if (window.__tsSubmitted) extLog('🚀 已自動送出！');
+    if (window.__tsSubmitted) {
+        extLog('🚀 已自動送出！');
+        playBeep('order');
+    }
 }
 
 // =========================================================================
@@ -2002,6 +2141,7 @@ async function solveCaptchaOnce(forceRun = false, allowSubmit = false, doFill = 
                     body: JSON.stringify({
                         image: imageData,
                         length: expectedLength,
+                        model: captchaModelForPlatform(),
                         recognizeTimes: 1,
                         currentRound: attempt + 1,
                         yiiHash: yiiHash,

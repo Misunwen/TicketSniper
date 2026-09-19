@@ -86,8 +86,28 @@
             <label class="line"><input type="checkbox" id="autoClickZone"> 自動點擊指定區域／票價</label>
         </div>
         <div class="item">
-            <label class="cap">區域關鍵字（逗號隔開）：</label>
-            <input type="text" id="zoneKeywords" placeholder="例如：VIP, 特區, 1樓A區">
+            <label class="cap">區域關鍵字（分號＝備案，空白＝同時符合）：</label>
+            <input type="text" id="zoneKeywords" placeholder="例如：VIP;1樓A區 特區;B區">
+            <div class="hint">由左至右優先；例「A區 週六」表示同時含 A區 與 週六</div>
+        </div>
+        <div class="item">
+            <label class="cap">排除關鍵字（分號隔開）：</label>
+            <input type="text" id="keywordExclude" placeholder="輪椅;身障;視線不完整">
+        </div>
+        <div class="item row">
+            <label class="cap" style="margin:0;">選區順序：</label>
+            <select id="areaSelectMode" style="flex:1;">
+                <option value="from top to bottom">由上而下（預設）</option>
+                <option value="from bottom to top">由下而上</option>
+                <option value="center">取中間</option>
+                <option value="random">隨機</option>
+            </select>
+        </div>
+        <div class="item">
+            <label class="line"><input type="checkbox" id="areaAutoFallback"> 關鍵字找不到時自動遞補（依選區順序）</label>
+        </div>
+        <div class="item">
+            <label class="line"><input type="checkbox" id="playSound"> 搶到票／送出成功時播放提示音</label>
         </div>
     </div>
 

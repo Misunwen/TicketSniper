@@ -17,7 +17,8 @@ TicketSniper/
 │  ├─ popup.html/js    設定面板
 │  └─ inject.min.js    ibon 專用橋接
 ├─ server/             OCR 伺服器（大腦）
-│  ├─ app_en_tixcraft_V3.py   Flask + ddddocr 辨識主程式
+│  ├─ app_en_tixcraft_V3.py   Flask 辨識主程式
+│  ├─ models/          自訓練 ONNX 模型（tixcraft_tm / universal）
 │  ├─ requirements.txt
 │  └─ recognition_log.dat     辨識紀錄（執行後產生）
 ├─ 啟動伺服器.bat      一鍵啟動（會自動安裝套件）
@@ -50,9 +51,14 @@ TicketSniper/
 - 售完自動重整：賣完時自動 F5，隨機等 5~15 秒。
 - 自動選擇票數：1~4 張。
 - 自動點擊指定區域／票價：開啟並填關鍵字。
-- 區域關鍵字：用逗號分隔多個備案，由左至右優先。
-  例：VIP, 1樓A區, 特區, B區
+- 區域關鍵字（分號＝備案，由左至右優先；同一段空白＝要同時符合）：
+  例：VIP;1樓A區;特區;B區
+  例：A區 週六   ← 名稱要同時包含「A區」和「週六」
   （關鍵字盡量精準、避免含票價或剩餘數量）
+- 排除關鍵字：不想選到的字，例：輪椅;身障;視線不完整。
+- 選區順序：由上而下（預設）／由下而上／取中間／隨機。
+- 自動遞補：關鍵字都沒命中時，改成依「選區順序」挑一個。
+- 提示音：搶到票或送出成功時發出音效。
 
 【驗證碼辨識】
 - 識別後自動填入輸入框：建議開啟。
@@ -80,5 +86,9 @@ TicketSniper/
 - 讀不到 hash：該頁可能沒有 yiiCaptcha 外掛，通常不影響辨識。
 - 改了程式沒生效：到 chrome://extensions/ 重新載入擴充功能，並重啟伺服器。
 - 一次只開一個伺服器視窗，重複開啟會佔用同一個 port。
+- 驗證碼不準：本專案使用自訓練模型，必須安裝 requirements 指定的
+  「ddddocr==1.5.6」（1.6 版與模型不相容）。重新執行 安裝套件.bat 即可。
+- 模型授權：server/models 內的模型來自 tickets_hunter 專案（GPL-3.0），
+  詳見 server/models/NOTICE.txt。
 
 ※ 本工具僅供個人研究與學習，請遵守各售票網站的使用條款與法令。

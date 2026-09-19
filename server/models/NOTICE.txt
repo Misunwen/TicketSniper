@@ -1,0 +1,16 @@
+本目錄下的自訓練 ONNX 模型（tixcraft_tm、universal）來自下列專案：
+
+  專案：tickets_hunter (a.k.a. MaxBot 後續延伸)
+  作者：bouob
+  來源：https://github.com/bouob/tickets_hunter
+  路徑：src/assets/model/{tixcraft_tm,universal}/
+  授權：GNU General Public License v3.0 (GPL-3.0)
+
+tixcraft_tm 為 TixCraft / Ticketmaster / indievox 家族調校（純小寫 a-z）；
+universal 為通用模型（數字 + 大小寫英文）。
+
+使用限制：
+- 依 GPL-3.0，散布本專案（含這些模型）時，本專案亦須以 GPL-3.0 釋出並保留出處標註。
+- 僅供個人研究與學習，請遵守各售票網站的使用條款與相關法令。
+
+載入方式需 ddddocr==1.5.6（1.6+ 對這類 int64 索引輸出的解碼不相容）。
