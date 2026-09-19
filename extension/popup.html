@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>TicketSniper 搶票狙擊手</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            width: 380px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft JhengHei', sans-serif;
+            background: #14161a;
+            color: #e8e8e8;
+        }
+        .container { padding: 14px; }
+        h2 { font-size: 16px; margin-bottom: 12px; color: #4CAF50; text-align: center; text-shadow: 0 0 6px rgba(76,175,80,.4); }
+        h3 { font-size: 13px; margin: 0 0 8px; color: #9ad19c; letter-spacing: .5px; }
+        .section {
+            background: #1e2228;
+            border: 1px solid #2b3138;
+            border-radius: 8px;
+            padding: 10px;
+            margin-bottom: 10px;
+        }
+        .item { margin-bottom: 9px; font-size: 13px; }
+        .item:last-child { margin-bottom: 0; }
+        .item label.line { display: flex; align-items: center; gap: 7px; cursor: pointer; }
+        .item > label.cap { display: block; margin-bottom: 5px; color: #9aa4af; }
+        input[type="checkbox"] { width: 15px; height: 15px; accent-color: #4CAF50; cursor: pointer; flex: none; }
+        input[type="text"], input[type="number"], select {
+            width: 100%; padding: 7px; border-radius: 5px; border: 1px solid #3a424c;
+            background: #101216; color: #e8e8e8; font-size: 13px;
+        }
+        input[type="text"]:focus, input[type="number"]:focus, select:focus { outline: none; border-color: #4CAF50; }
+        input.small-num { width: 70px; text-align: center; }
+        .hint { font-size: 11px; color: #6f7a86; margin-top: 3px; }
+        .danger { color: #ff6b6b; font-weight: bold; }
+        .row { display: flex; align-items: center; gap: 8px; }
+        .status-bar {
+            display: flex; align-items: center; justify-content: space-between;
+            background: #1e2228; border: 1px solid #2b3138; border-radius: 8px;
+            padding: 8px 10px; margin-bottom: 8px; font-size: 13px;
+        }
+        button {
+            width: 100%; padding: 10px; border: none; border-radius: 6px;
+            font-size: 14px; font-weight: 600; cursor: pointer; transition: background .2s;
+        }
+        .primary-btn { background: #4CAF50; color: #fff; }
+        .primary-btn:hover { background: #45a049; }
+        .secondary-btn { background: #2196F3; color: #fff; }
+        .secondary-btn:hover { background: #1976d2; }
+        .danger-btn { background: #b23b3b; color: #fff; font-size: 12px; padding: 8px; }
+        .danger-btn:hover { background: #972f2f; }
+        .buttons { display: flex; flex-direction: column; gap: 7px; margin-bottom: 10px; }
+        #field-info { background: #17301b; border: 1px solid #2e6b36; border-radius: 6px; padding: 8px 10px; margin-bottom: 10px; font-size: 12px; color: #a5e0ad; word-break: break-all; }
+        #result { background: #1e2228; border-left: 4px solid #4CAF50; border-radius: 6px; padding: 10px; margin-bottom: 10px; font-size: 13px; min-height: 20px; word-break: break-all; display: none; }
+        #result.loading { border-color: #f39c12; color: #f5c26b; }
+        #result.success { border-color: #4CAF50; color: #a5e0ad; }
+        #result.error { border-color: #e74c3c; color: #ff9d9d; }
+        .footer { text-align: center; font-size: 11px; color: #56606b; margin-top: 4px; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h2>🎯 TicketSniper 搶票狙擊手</h2>
+
+    <!-- 自動搶票 -->
+    <div class="section">
+        <h3>🖱️ 自動搶票</h3>
+        <div class="item">
+            <label class="line"><input type="checkbox" id="autoCheck"> 自動勾選「同意服務條款」</label>
+        </div>
+        <div class="item">
+            <label class="line"><input type="checkbox" id="autoReload"> 售完自動重整（隨機等待 5–15 秒）</label>
+        </div>
+        <div class="item">
+            <label class="cap">自動選擇票數：</label>
+            <select id="dropdownValue">
+                <option value="none">不自動選張數</option>
+                <option value="1">1 張</option>
+                <option value="2">2 張</option>
+                <option value="3">3 張</option>
+                <option value="4">4 張</option>
+            </select>
+        </div>
+        <div class="item">
+            <label class="line"><input type="checkbox" id="autoClickZone"> 自動點擊指定區域／票價</label>
+        </div>
+        <div class="item">
+            <label class="cap">區域關鍵字（逗號隔開）：</label>
+            <input type="text" id="zoneKeywords" placeholder="例如：VIP, 特區, 1樓A區">
+        </div>
+    </div>
+
+    <!-- 驗證碼 -->
+    <div class="status-bar">
+        <span>🖥️ 伺服器狀態：</span>
+        <span id="serverStatus" style="font-weight:bold;color:#f39c12;">🟡 檢查中...</span>
+    </div>
+    <div class="status-bar">
+        <span>🔐 Yii2 hash：</span>
+        <span id="hashStatus" style="font-weight:bold;color:#999;">— 未檢查</span>
+    </div>
+
+    <div class="section">
+        <h3>🧩 驗證碼辨識</h3>
+        <div class="item">
+            <label class="line"><input type="checkbox" id="autoFill" checked> 識別後自動填入輸入框</label>
+        </div>
+        <div class="item">
+            <label class="line"><input type="checkbox" id="autoRun"> 開啟全自動模式（載入／F5 自動辨識）</label>
+        </div>
+        <div class="item">
+            <label class="line"><input type="checkbox" id="yiiHashEnabled" checked> 🔐 使用 Yii2 hash 校正（可修正單字元錯誤）</label>
+        </div>
+        <div class="item">
+            <label class="line"><input type="checkbox" id="autoSubmit" class="danger"> ⚠️ 驗證碼填完後自動送出／下一步</label>
+        </div>
+        <div class="item">
+            <label class="cap">伺服器網址：</label>
+            <input type="text" id="serverUrl" placeholder="http://127.0.0.1:5000">
+        </div>
+        <div class="item">
+            <label class="cap">輸入模式：</label>
+            <select id="typingMode">
+                <option value="simulate">逐字模擬打字（安全防禦高）</option>
+                <option value="instant">瞬間直接帶入（極致速度）</option>
+            </select>
+        </div>
+        <div class="item row">
+            <label class="cap" style="margin:0;">驗證碼長度：</label>
+            <input type="number" id="captchaLength" class="small-num" value="4" min="1" max="10">
+            <label class="cap" style="margin:0 0 0 8px;">重試次數：</label>
+            <input type="number" id="recognizeTimes" class="small-num" value="1" min="1" max="5">
+        </div>
+        <div class="hint">長度 1–10；重試 1–5（長度不符才續試）</div>
+    </div>
+
+    <div id="field-info" style="display:none;">
+        <strong>已選擇輸入框：</strong><span id="fieldName"></span>
+    </div>
+
+    <div class="buttons">
+        <button id="selectBtn" class="secondary-btn">🖱️ 手動選擇驗證碼輸入框</button>
+        <button id="recognizeBtn" class="primary-btn">🔍 識別驗證碼（F4 重新讀取）</button>
+        <button id="clearBtn" class="danger-btn">🗑️ 清除選擇的輸入框</button>
+    </div>
+
+    <div id="result"></div>
+
+    <div class="footer">地端辨識，不外傳圖片 · v1.0</div>
+</div>
+<script src="popup.js"></script>
+</body>
+</html>

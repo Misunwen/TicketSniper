@@ -1,0 +1,14 @@
+(function() {
+    const TOKEN = '__BOT_IBON__';
+    window.addEventListener("message", function(n) {
+        if (!n.data || n.data.type !== TOKEN) return;
+        var script = n.data.script;
+        console.log('[inject] 收到指令:', script);
+        try {
+            eval(script);
+        } catch(e) {
+            console.log('[inject] eval 失敗:', e.message);
+        }
+    });
+    console.log('[inject] ✅ 已就緒 TOKEN=' + TOKEN);
+})();

@@ -1,0 +1,6 @@
+flask
+flask-cors
+pillow
+numpy
+ddddocr
+pyinstaller==6.5.0

@@ -1,0 +1,58 @@
+{
+  "manifest_version": 3,
+  "name": "TicketSniper 搶票狙擊手",
+  "version": "1.0",
+  "description": "整合自動點擊搶票與地端 AI 驗證碼辨識（tixcraft / kktix / ibon）",
+  "icons": {
+    "16": "icon.png",
+    "48": "icon.png",
+    "128": "icon.png"
+  },
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "*://*.tixcraft.com/*",
+    "*://*.kktix.cc/*",
+    "*://*.kktix.com/*",
+    "*://*.ibon.com.tw/*",
+    "http://127.0.0.1/*",
+    "http://localhost/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icon.png",
+      "48": "icon.png",
+      "128": "icon.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.tixcraft.com/*",
+        "*://*.kktix.cc/*",
+        "*://*.kktix.com/*",
+        "*://*.ibon.com.tw/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_start"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["inject.min.js", "icon.png"],
+      "matches": [
+        "*://*.tixcraft.com/*",
+        "*://*.kktix.cc/*",
+        "*://*.kktix.com/*",
+        "*://*.ibon.com.tw/*"
+      ]
+    }
+  ]
+}

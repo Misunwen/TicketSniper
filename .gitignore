@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+*.exe
+
+# 辨識紀錄（執行時產生）
+recognition_log.dat
+recognition_log_*.dat
+
+# 作業系統 / 編輯器
+Thumbs.db
+desktop.ini
+.DS_Store
+.idea/
+.vscode/
+*.log
