@@ -4,6 +4,37 @@
 格式參考 [Keep a Changelog](https://keepachangelog.com/zh-TW/1.1.0/)，
 版本號遵循 [Semantic Versioning](https://semver.org/lang/zh-TW/)。
 
+## [1.4.0] - 2026-09-20
+
+### Added
+- launcher **IBON CDP 模式**（`launcher/ibon.py`）：改在 CDP 層操作舊版 `.aspx`（UTK0201），
+  一般元素以 `tab.mouse_click`（`Input.dispatchMouseEvent`，受信任）點擊，image map／難取座標者
+  以元素 `.click()`；解析頁面 `jsonData` 做關鍵字/價格比對。設定：
+  `ibon_auto`、`ibon_area_keyword`、`ibon_exclude_keyword`、`ibon_fallback`、`ibon_ticket_count`。
+- 擴充功能新增 **`ibonAuto`** 開關：改用 launcher CDP 模式時可關閉擴充功能的 IBON 動作，避免重複。
+- IBON 表格匹配（擴充功能）也套用**排除關鍵字**（輪椅／身障／視線不完整…）。
+- launcher **IBON 新版 SPA 支援（實驗）**：以 CDP `DOM.perform_search`（pierce，可穿透
+  closed Shadow DOM）探索可點元素並記錄，可用 `ibon_spa_keyword` 指定要點的文字、
+  `ibon_spa_query` 指定搜尋選擇器；未設定關鍵字時只記錄不點擊。
+- launcher **Cloudflare 驗證自動處理**：定期偵測 Turnstile／「Just a moment」頁面並呼叫
+  驅動內建的 `verify_cf()`（`cf_auto_solve`，預設開；`cf_check_interval` 預設 3 秒）。
+- launcher **cookie 注入**：`cookies`（JSON 陣列）或 `cookies_file`（JSON 檔）可在啟動後
+  注入登入 session 並重新載入；範例 `launcher/cookies.example.json`，`cookies.json` 已 gitignore。
+- 擴充功能：新增 IBON WAF／Cloudflare 頁面偵測，LOG 會明確顯示「連線暫時受限」或
+  「Cloudflare 驗證」而非只有「找不到 jsonData」。
+
+### Changed
+- launcher 預設驅動改為 **zendriver**（nodriver 的維護分支，stealth/CDP 修正較新），
+  可用 `launcher/config.json` 的 `driver` 設回 `"nodriver"`；找不到 zendriver 時自動退回。
+- `launcher/requirements.txt` 加入 `zendriver>=0.16`。
+
+### Fixed
+- KKTIX／拓元同意條款：改為「重試直到確認真的被勾選」（依序：原生 `.click()` → CDP 受信任點擊
+  → 原生 `checked` setter + `input/change` 事件），修正只勾一次而可能沒打勾、導致後續
+  「下一步／電腦配位」按鈕一直無法使用的問題。
+- launcher（zendriver）：若前一次啟動的 Chrome 仍開著並佔用 `chrome_profile`，新的啟動會
+  出現「Failed to connect to browser」；請先關閉舊的啟動器瀏覽器視窗再重跑。
+
 ## [1.3.1] - 2026-09-19
 
 ### Changed

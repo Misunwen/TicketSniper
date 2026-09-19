@@ -1,10 +1,10 @@
 @echo off
 chcp 65001 >nul
-title TicketSniper - 啟動瀏覽器 (nodriver)
+title TicketSniper - 啟動瀏覽器 (zendriver)
 color 0B
 cd /d "%~dp0launcher"
 echo ===================================================
-echo    TicketSniper - nodriver 啟動器
+echo    TicketSniper - 瀏覽器啟動器
 echo ===================================================
 echo.
 python --version >nul 2>&1
@@ -14,7 +14,7 @@ if %errorlevel% neq 0 (
     pause
     exit /b
 )
-echo [1/2] 檢查並安裝 nodriver...
+echo [1/2] 檢查並安裝瀏覽器驅動（zendriver／nodriver）...
 pip install -r requirements.txt -q
 echo       完成。
 echo.

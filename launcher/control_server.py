@@ -18,10 +18,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
 class ControlServer:
-    def __init__(self, browser, loop, token, host='127.0.0.1', port=5100):
+    def __init__(self, browser, loop, token, cdp=None, host='127.0.0.1', port=5100):
         self.browser = browser
         self.loop = loop
         self.token = token
+        self.cdp = cdp
         self.host = host
         self.port = port
         self._httpd = None
@@ -123,7 +124,10 @@ class ControlServer:
         x = float(data['x'])
         y = float(data['y'])
         tab = await self._resolve_tab(data.get('href'))
-        from nodriver.cdp import input_ as cdp_input
+        cdp = self.cdp
+        if cdp is None:
+            from nodriver import cdp  # 備援
+        cdp_input = cdp.input_
         await tab.send(cdp_input.dispatch_mouse_event(
             type_='mouseMoved', x=x, y=y, buttons=0))
         await tab.sleep(0.03)

@@ -119,6 +119,19 @@ TicketSniper/
   * block_trackers：預設 false。設 true 會封鎖分析／追蹤／側錄請求；但部分平台
     （如 IBON）會因缺少追蹤 beacon 而判定為機器人，請確認不影響後再開啟。
   * save_log：預設 true，會把啟動器輸出同步寫入 launcher/launcher_log.txt。
+  * driver：預設 "zendriver"（nodriver 維護分支，stealth 較新）；可改 "nodriver"。
+  * cf_auto_solve：預設 true。啟動器會定期偵測 Cloudflare 驗證頁並自動處理
+    （Turnstile / Just a moment）；失敗時請手動點一下。
+  * cookies / cookies_file：注入登入 cookie（讓瀏覽器帶已登入 session）。
+    cookies 為 JSON 陣列，或 cookies_file 指向 JSON 檔（格式見 launcher/cookies.example.json）。
+    例：cookies_file 設 "cookies.json"（請自行把範例複製成 cookies.json 並填入）。
+  * ibon_auto：預設 false。設 true 時，launcher 以 CDP 受信任點擊自動操作 IBON 舊版
+    .aspx（UTK0201）流程；此時請把擴充功能 popup 的「IBON 自動化」取消，避免重複。
+  * ibon_area_keyword / ibon_exclude_keyword / ibon_fallback / ibon_ticket_count：
+    IBON 的區域關鍵字（`;`／`,` 備案、空白＝AND）、排除字、找不到時遞補、購買張數。
+  * ibon_spa_keyword / ibon_spa_query：新版 IBON SPA（closed Shadow DOM）用；
+    以 CDP 穿透搜尋可點元素，`ibon_spa_keyword` 指定要點的文字（`;`／`,` 備案），
+    `ibon_spa_query` 指定搜尋選擇器。未設定關鍵字時只記錄發現的元素，不會點擊。
 
 ----------------------------------------
  操作小技巧

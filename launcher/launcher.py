@@ -1,18 +1,20 @@
 # encoding=utf-8
 """
-TicketSniper nodriver 啟動器
+TicketSniper 瀏覽器啟動器
 
 一鍵流程：
   1. 檢查/安裝 OCR 伺服器套件，並確認 ddddocr 版本為 1.5.6（自訓練模型需求）
   2. 自動啟動 OCR 伺服器（Flask），並等它 /health 就緒
   3. 自動取得 Chrome for Testing（支援自動載入外掛）或使用指定瀏覽器
-  4. 用 nodriver 開專用 profile，自動載入 extension 並導到活動頁
+  4. 用瀏覽器驅動（預設 zendriver，可設 driver 改用 nodriver）開專用 profile，
+     自動載入 extension 並導到活動頁；另提供 CDP 受信任點擊控制伺服器
 
 Chrome 137+ 只在「品牌 Chrome」移除 --load-extension；Chrome for Testing / Chromium
 仍支援，所以預設會自動下載 Chrome for Testing 來達到全自動載入外掛。
 若改用品牌 Chrome，會加上 --disable-features=DisableLoadExtensionCommandLineSwitch 嘗試還原。
 """
 import asyncio
+import inspect
 import json
 import platform
 import secrets
@@ -29,6 +31,12 @@ try:
 except Exception:  # 允許從其他工作目錄匯入
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from control_server import ControlServer
+
+try:
+    import ibon as ibon_mod
+except Exception:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import ibon as ibon_mod
 
 try:
     sys.stdout.reconfigure(encoding='utf-8')
@@ -56,6 +64,18 @@ DEFAULTS = {
     "control_port": 5100,
     "block_trackers": False,
     "save_log": True,
+    "driver": "zendriver",
+    "cf_auto_solve": True,
+    "cf_check_interval": 3,
+    "cookies": [],
+    "cookies_file": "",
+    "ibon_auto": False,
+    "ibon_area_keyword": "",
+    "ibon_exclude_keyword": "輪椅;身障;身心;障礙;Restricted View;燈柱遮蔽;視線不完整",
+    "ibon_fallback": False,
+    "ibon_ticket_count": 1,
+    "ibon_spa_keyword": "",
+    "ibon_spa_query": "button, a, [role=\"button\"]",
     "extra_args": []
 }
 
@@ -158,6 +178,41 @@ def load_config():
 def resolve(p):
     path = Path(p)
     return path if path.is_absolute() else (BASE / path).resolve()
+
+
+# =========================================================================
+# 驅動選擇：zendriver（預設，stealth 較新）或 nodriver（備援）
+# =========================================================================
+def read_driver_setting():
+    try:
+        p = BASE / 'config.json'
+        if p.exists():
+            v = json.loads(p.read_text(encoding='utf-8')).get('driver')
+            if v:
+                return str(v).strip().lower()
+    except Exception:
+        pass
+    return 'zendriver'
+
+
+def load_driver(name):
+    """回傳 (uc_module, cdp_module, 實際名稱)。"""
+    name = (name or 'zendriver').lower()
+    if name == 'zendriver':
+        try:
+            import zendriver as uc
+            from zendriver import cdp
+            return uc, cdp, 'zendriver'
+        except Exception as e:
+            print(f"⚠ 無法載入 zendriver（{e}），改用 nodriver")
+    try:
+        import nodriver as uc
+        from nodriver import cdp
+        return uc, cdp, 'nodriver'
+    except Exception as e:
+        print(f"❌ 找不到 zendriver 或 nodriver：{e}")
+        print("   請先執行 安裝套件.bat 或 pip install -r launcher/requirements.txt")
+        raise SystemExit(1)
 
 
 # =========================================================================
@@ -295,22 +350,99 @@ def ensure_chrome_for_testing(cfg):
 # =========================================================================
 # 網路封鎖（追蹤／分析）
 # =========================================================================
-async def block_trackers(tab, urls):
+async def block_trackers(tab, urls, cdp):
     """透過 CDP Network.setBlockedURLs 封鎖追蹤請求（不影響購票必要資源）。"""
-    from nodriver.cdp import network as cdp_network
-    await tab.send(cdp_network.enable())
-    await tab.send(cdp_network.set_blocked_ur_ls(urls=urls))
+    await tab.send(cdp.network.enable())
+    await tab.send(cdp.network.set_blocked_ur_ls(urls=urls))
+
+
+# =========================================================================
+# Cookie 注入（讓瀏覽器帶著登入 session，降低被判定機器人的機率）
+# =========================================================================
+def load_cookies(cfg):
+    cookies = list(cfg.get('cookies') or [])
+    cf = (cfg.get('cookies_file') or '').strip()
+    if cf:
+        p = Path(cf)
+        if not p.is_absolute():
+            p = (BASE / p).resolve()
+        if p.exists():
+            try:
+                data = json.loads(p.read_text(encoding='utf-8'))
+                if isinstance(data, list):
+                    cookies += data
+                else:
+                    print(f"⚠ cookies_file 格式需為 JSON 陣列：{p}")
+            except Exception as e:
+                print(f"⚠ 讀取 cookies_file 失敗：{e}")
+        else:
+            print(f"⚠ 找不到 cookies_file：{p}")
+    return [c for c in cookies
+            if isinstance(c, dict) and c.get('name') and c.get('value') is not None]
+
+
+async def apply_cookies(tab, cookies, cdp):
+    if not cookies:
+        return 0
+    await tab.send(cdp.network.enable())
+    ok = 0
+    for c in cookies:
+        try:
+            await tab.send(cdp.network.set_cookie(
+                name=str(c['name']),
+                value=str(c['value']),
+                url=c.get('url') or None,
+                domain=c.get('domain') or None,
+                path=c.get('path') or '/',
+                secure=(c.get('secure') if 'secure' in c else c.get('isSecure')),
+                http_only=(c.get('http_only') if 'http_only' in c else c.get('httpOnly')),
+            ))
+            ok += 1
+        except Exception as e:
+            print(f"⚠ 設定 cookie {c.get('name')} 失敗：{e}")
+    return ok
+
+
+# =========================================================================
+# Cloudflare 驗證處理（Turnstile / Just a moment）
+# =========================================================================
+async def maybe_solve_cloudflare(tab, cfg):
+    try:
+        title = (tab.title or '')
+    except Exception:
+        title = ''
+    is_cf = ('just a moment' in title.lower()) or ('attention required' in title.lower())
+    if not is_cf:
+        try:
+            res = await tab.evaluate('''(() => {
+                try {
+                    const t = ((document.body && document.body.innerText) || '').toLowerCase();
+                    const markers = ['verify you are human', 'just a moment', 'checking your browser',
+                        '\\u6b63\\u5728\\u9a57\\u8b49\\u60a8\\u662f\\u5426\\u662f\\u4eba\\u985e', '\\u6aa2\\u67e5\\u60a8\\u7684\\u700f\\u89bd\\u5668'];
+                    const hasWidget = !!document.querySelector(
+                        'iframe[src*="challenges.cloudflare.com"], .cf-turnstile, #challenge-form, #cf-challenge-running, #turnstile-wrapper');
+                    return hasWidget || markers.some(m => t.includes(m));
+                } catch (e) { return false; }
+            })()''')
+            is_cf = bool(res)
+        except Exception:
+            is_cf = False
+    if not is_cf:
+        return False
+    print("🛡️ 偵測到 Cloudflare 驗證，嘗試自動處理（或請手動點一下）...")
+    try:
+        await tab.verify_cf()
+        print("🛡️ Cloudflare 驗證處理完成")
+        return True
+    except Exception as e:
+        print(f"⚠ Cloudflare 自動處理失敗（請手動完成）：{e}")
+        return False
 
 
 # =========================================================================
 # 主流程
 # =========================================================================
-async def main():
-    try:
-        import nodriver as uc
-    except ImportError:
-        print("❌ 尚未安裝 nodriver，請先執行：pip install -r requirements.txt")
-        return
+async def main(uc, cdp):
 
     cfg = load_config()
     profile = resolve(cfg['user_data_dir'])
@@ -350,7 +482,7 @@ async def main():
     args += list(cfg.get('extra_args') or [])
 
     print("=" * 60)
-    print(" TicketSniper nodriver 啟動器")
+    print(" TicketSniper 瀏覽器啟動器")
     print(f" 專用設定檔：{profile}")
     print(f" 外掛資料夾：{ext if ext.exists() else '（未找到）'}")
     print(f" 瀏覽器　　：{chrome_exe or '（系統預設 Chrome）'}")
@@ -361,12 +493,24 @@ async def main():
     if chrome_exe:
         uc_kwargs['browser_executable_path'] = chrome_exe
 
-    browser = await uc.start(**uc_kwargs)
+    try:
+        browser = await uc.start(**uc_kwargs)
+    except Exception as e:
+        print(f"❌ 無法啟動／連線瀏覽器：{e}")
+        print(f"   常見原因：上一次啟動的瀏覽器仍在執行，佔用了 profile：")
+        print(f"   {profile}")
+        print("   請關閉所有由本啟動器開啟的瀏覽器視窗後再重跑。")
+        if server_proc:
+            try:
+                server_proc.terminate()
+            except Exception:
+                pass
+        return
 
     # 3.5) 封鎖追蹤／分析請求
-    if cfg.get('block_trackers', True):
+    if cfg.get('block_trackers', False):
         try:
-            await block_trackers(browser.main_tab, TRACKER_BLOCKLIST)
+            await block_trackers(browser.main_tab, TRACKER_BLOCKLIST, cdp)
             print(f"✅ 已封鎖 {len(TRACKER_BLOCKLIST)} 項追蹤／分析請求")
         except Exception as e:
             print(f"⚠ 封鎖追蹤請求失敗（不影響其他功能）：{e}")
@@ -377,7 +521,7 @@ async def main():
         try:
             control_server = ControlServer(
                 browser=browser, loop=asyncio.get_running_loop(),
-                token=control_token, host='127.0.0.1', port=control_port)
+                token=control_token, cdp=cdp, host='127.0.0.1', port=control_port)
             control_server.start()
             print(f"✅ CDP 受信任點擊控制埠：http://127.0.0.1:{control_port}")
         except Exception as e:
@@ -392,11 +536,26 @@ async def main():
         print("ℹ config.json 的 url 為空，已開新分頁；請填入目標網址後重新啟動。")
 
     # 導覽後再套用一次（確保在此分頁的 Network domain 已建立）
-    if cfg.get('block_trackers', True):
+    if cfg.get('block_trackers', False):
         try:
-            await block_trackers(browser.main_tab, TRACKER_BLOCKLIST)
+            await block_trackers(browser.main_tab, TRACKER_BLOCKLIST, cdp)
         except Exception:
             pass
+
+    # 5) 注入 cookie（登入 session）→ 重新載入讓網站套用
+    cookies = load_cookies(cfg)
+    if cookies:
+        try:
+            n_cookie = await apply_cookies(browser.main_tab, cookies, cdp)
+            print(f"✅ 已注入 {n_cookie} 個 cookie")
+            if url:
+                try:
+                    await browser.main_tab.reload()
+                    await asyncio.sleep(1.0)
+                except Exception:
+                    pass
+        except Exception as e:
+            print(f"⚠ 注入 cookie 失敗：{e}")
 
     if cfg.get('open_extensions_page'):
         try:
@@ -405,17 +564,40 @@ async def main():
         except Exception as e:
             print(f"ℹ 請手動開啟 chrome://extensions 載入外掛。({e})")
 
+    # 6) 主迴圈：IBON CDP 自動化 + 定期處理 Cloudflare 驗證
+    cf_enabled = cfg.get('cf_auto_solve', True)
+    ibon_enabled = bool(cfg.get('ibon_auto', False))
+    try:
+        cf_interval = max(1, int(float(cfg.get('cf_check_interval') or 3)))
+    except Exception:
+        cf_interval = 3
     print("瀏覽器保持開啟中；按 Ctrl+C 或關閉此視窗即可結束。")
     try:
+        tick = 0
         while True:
             await asyncio.sleep(1)
+            tick += 1
+            # IBON（舊版 .aspx）→ CDP 受信任點擊
+            if ibon_enabled:
+                try:
+                    await ibon_mod.step(browser.main_tab, cfg, cdp)
+                except Exception:
+                    pass
+            # Cloudflare 驗證（每 cf_interval 秒檢查一次）
+            if cf_enabled and tick % cf_interval == 0:
+                try:
+                    await maybe_solve_cloudflare(browser.main_tab, cfg)
+                except Exception:
+                    pass
     except (KeyboardInterrupt, asyncio.CancelledError):
         pass
     finally:
         if control_server:
             control_server.stop()
         try:
-            browser.stop()
+            res = browser.stop()
+            if inspect.isawaitable(res):
+                await res
         except Exception:
             pass
         if server_proc:
@@ -458,7 +640,7 @@ def _setup_log_file():
                 pass
         if not save:
             return None
-        f = open(BASE / 'launcher_log.txt', 'w', encoding='utf-8')
+        f = open(BASE / 'launcher_log.txt', 'w', encoding='utf-8', buffering=1)
         out = sys.__stdout__ or sys.stdout
         err = sys.__stderr__ or sys.stderr
         sys.stdout = _Tee(out, f)
@@ -472,8 +654,13 @@ def _setup_log_file():
 if __name__ == '__main__':
     _log_file = _setup_log_file()
     try:
-        import nodriver as uc
-        uc.loop().run_until_complete(main())
+        _uc, _cdp, _driver_name = load_driver(read_driver_setting())
+        print(f"ℹ 瀏覽器驅動：{_driver_name}")
+        if _driver_name == 'zendriver':
+            # zendriver 的 loop() 已 deprecated，直接用 asyncio
+            asyncio.run(main(_uc, _cdp))
+        else:
+            _uc.loop().run_until_complete(main(_uc, _cdp))
     except KeyboardInterrupt:
         print("\n已結束。")
     finally:

@@ -37,6 +37,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const areaSelectMode   = $('areaSelectMode');
     const areaAutoFallback = $('areaAutoFallback');
     const kktixSeatMode    = $('kktixSeatMode');
+    const ibonAuto         = $('ibonAuto');
     const playSound        = $('playSound');
 
     const serverStatus     = $('serverStatus');
@@ -64,7 +65,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // =========================================
     chrome.storage.local.get([
         'autoCheck', 'autoReload', 'dropdownValue', 'autoClickZone', 'zoneKeywords', 'autoSubmit',
-        'keywordExclude', 'areaSelectMode', 'areaAutoFallback', 'playSound', 'kktixSeatMode',
+        'keywordExclude', 'areaSelectMode', 'areaAutoFallback', 'playSound', 'kktixSeatMode', 'ibonAuto',
         'autoFill', 'autoRun', 'yiiHashEnabled', 'serverUrl', 'typingMode', 'captchaLength', 'recognizeTimes',
         'savedSelector', 'debugLog'
     ], (data) => {
@@ -79,6 +80,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (data.areaAutoFallback !== undefined) areaAutoFallback.checked = data.areaAutoFallback;
         if (data.playSound !== undefined) playSound.checked = data.playSound;
         kktixSeatMode.value = data.kktixSeatMode || 'none';
+        if (data.ibonAuto !== undefined) ibonAuto.checked = data.ibonAuto;
 
         if (data.autoFill !== undefined) autoFill.checked = data.autoFill;
         if (data.autoRun !== undefined) autoRun.checked = data.autoRun;
@@ -121,6 +123,7 @@ document.addEventListener('DOMContentLoaded', () => {
     areaSelectMode.addEventListener('change', () => chrome.storage.local.set({ areaSelectMode: areaSelectMode.value }));
     areaAutoFallback.addEventListener('change', () => chrome.storage.local.set({ areaAutoFallback: areaAutoFallback.checked }));
     kktixSeatMode.addEventListener('change', () => chrome.storage.local.set({ kktixSeatMode: kktixSeatMode.value }));
+    ibonAuto.addEventListener('change', () => chrome.storage.local.set({ ibonAuto: ibonAuto.checked }));
     playSound.addEventListener('change', () => chrome.storage.local.set({ playSound: playSound.checked }));
 
     autoFill.addEventListener('change', () => chrome.storage.local.set({ autoFill: autoFill.checked }));

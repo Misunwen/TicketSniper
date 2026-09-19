@@ -354,6 +354,45 @@ async function clickElement(el) {
     return true;
 }
 
+// 勾選 checkbox 並確認真的被勾選（Angular 常不會即時反映，需重試／用原生 setter）
+function setNativeChecked(el, checked) {
+    try {
+        const desc = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'checked');
+        if (desc && desc.set) desc.set.call(el, checked);
+        else el.checked = checked;
+    } catch (e) {
+        try { el.checked = checked; } catch (_) {}
+    }
+}
+
+async function ensureChecked(cb) {
+    if (!cb) return false;
+    for (let i = 0; i < 4; i++) {
+        if (cb.checked) return true;
+        // 1) 原生 .click()（會 toggle 並觸發 change，Angular 才會更新）
+        try { cb.click(); } catch (e) {}
+        await sleep(150);
+        if (cb.checked) return true;
+        // 2) 第二輪起：CDP 受信任點擊（launcher 模式）
+        if (i >= 1) {
+            try { await clickElement(cb); } catch (e) {}
+            await sleep(150);
+            if (cb.checked) return true;
+        }
+        // 3) 第三輪起：原生 setter + input/change/click 事件
+        if (i >= 2) {
+            try {
+                setNativeChecked(cb, true);
+                cb.dispatchEvent(new Event('input', { bubbles: true }));
+                cb.dispatchEvent(new Event('change', { bubbles: true }));
+            } catch (e) {}
+            await sleep(120);
+            if (cb.checked) return true;
+        }
+    }
+    return !!cb.checked;
+}
+
 // ⑦ 判斷數量選擇器
 function isQuantitySelect(sel) {
     if (!sel) return false;
@@ -900,13 +939,43 @@ function patchIbonErrors() {
 // =========================================================================
 // 🟠 IBON 完整版（選區 + 數量頁整合）
 // =========================================================================
+// 偵測 IBON 的 WAF／Cloudflare 頁面，讓 LOG 明確顯示「被擋」而非只有找不到資料
+function detectIbonWafPage() {
+    try {
+        const t = (document.body ? document.body.innerText : '') || '';
+        const restricted = ['連線暫時受限', 'Access Temporarily Restricted', '暫時停止操作',
+            'unusual activity', '異常活動', '錯誤參考編號'];
+        if (restricted.some(m => t.includes(m))) return 'RESTRICTED';
+        const cf = ['正在驗證您是否是人類', 'Verify you are human', 'Just a moment',
+            'Checking your browser', '正在檢查您的瀏覽器'];
+        if (cf.some(m => t.includes(m))) return 'CLOUDFLARE';
+        return null;
+    } catch (e) {
+        return null;
+    }
+}
+
 async function runIBON(settings) {
     patchIbonErrors();
+
+    const waf = detectIbonWafPage();
+    if (waf) {
+        extLog(waf === 'RESTRICTED'
+            ? '⛔ [IBON] 偵測到「連線暫時受限 / Access Temporarily Restricted」WAF 頁面，停止自動化（請冷卻或換 IP）'
+            : '⛔ [IBON] 偵測到 Cloudflare 驗證頁面，停止自動化（需手動或 Cloudflare 處理）');
+        return;
+    }
+
+    if (settings.ibonAuto === false) {
+        extLog('ℹ️ [IBON] 擴充自動化已關閉（改用 launcher CDP 模式）');
+        return;
+    }
     
     const autoClickZone = settings.autoClickZone === true;
     const zoneKeywords = settings.zoneKeywords || "";
     const dropdownValue = settings.dropdownValue || "1";
     const autoReload = settings.autoReload === true || settings.autoReload === 'true';
+    const excludeGroups = parseKeywordGroups(settings.keywordExclude || DEFAULT_EXCLUDE_KEYWORDS);
     
     let url = window.location.href;
     
@@ -1183,7 +1252,12 @@ async function runIBON(settings) {
                         for (let row of availableRows) {
                             let zoneName = normalizeText(row.zoneName);
                             let price = row.price;
-                            
+
+                            // 先套用排除關鍵字（輪椅/身障/視線不完整…）
+                            if (isExcludedText(row.zoneName, excludeGroups)) {
+                                continue;
+                            }
+
                             let isMatch = false;
                             
                             if (target.type === 'PRICE') {
@@ -1464,8 +1538,9 @@ function runTixCraft(settings) {
                 if (autoCheck) {
                     let cb = document.querySelector('#TicketForm_agree, #agree');
                     if (cb && !cb.checked) {
-                        cb.click();
-                        extLog("✅ [拓元] 已勾選同意條款");
+                        if (await ensureChecked(cb)) {
+                            extLog("✅ [拓元] 已勾選同意條款");
+                        }
                     }
                 }
                 
@@ -1668,7 +1743,7 @@ function runKKTIX(settings) {
     let isStopped = false;
     let isWaitingLogShown = false;
     let localIsClicking = false;
-    let agreeClicked = false;
+    let agreeChecked = false;
     
     function extractPrice(ticketUnit) {
         if (!ticketUnit) return 0;
@@ -1704,14 +1779,23 @@ function runKKTIX(settings) {
         attempts++;
         try {
             if (!localIsClicking) {
-                if (autoCheck && !agreeClicked) {
+                if (autoCheck && !agreeChecked) {
                     let cb = document.getElementById('person_agree_terms');
-                    if (cb && !cb.checked) {
-                        cb.click();
-                        agreeClicked = true;
-                        extLog("✅ [KKTIX] 已勾選同意條款");
-                        setTimeout(loop, randInt(300, 500));
-                        return;
+                    if (cb) {
+                        if (cb.checked) {
+                            agreeChecked = true;
+                            extLog("✅ [KKTIX] 已勾選同意條款");
+                        } else {
+                            // 尚未真的打勾：重試（含受信任點擊／原生 setter），成功才繼續
+                            let ok = await ensureChecked(cb);
+                            if (ok) {
+                                agreeChecked = true;
+                                extLog("✅ [KKTIX] 已勾選同意條款");
+                            } else {
+                                setTimeout(loop, randInt(300, 500));
+                                return;
+                            }
+                        }
                     }
                 }
                 
@@ -1841,7 +1925,7 @@ function startAutoFill() {
     
     chrome.storage.local.get(
         ['autoCheck', 'autoReload', 'dropdownValue', 'autoClickZone', 'zoneKeywords', 'autoSubmit',
-         'keywordExclude', 'areaSelectMode', 'areaAutoFallback', 'playSound', 'kktixSeatMode'],
+         'keywordExclude', 'areaSelectMode', 'areaAutoFallback', 'playSound', 'kktixSeatMode', 'ibonAuto'],
         function(data) {
             let raw = data || {};
             let toBool = v => v === true || v === 'true';
@@ -1856,7 +1940,8 @@ function startAutoFill() {
                 zoneKeywords: raw.zoneKeywords || "",
                 keywordExclude: raw.keywordExclude || DEFAULT_EXCLUDE_KEYWORDS,
                 areaSelectMode: raw.areaSelectMode || "from top to bottom",
-                kktixSeatMode: raw.kktixSeatMode || "none"
+                kktixSeatMode: raw.kktixSeatMode || "none",
+                ibonAuto: raw.ibonAuto !== false
             };
 
             window.__tsPlaySound = settings.playSound;
