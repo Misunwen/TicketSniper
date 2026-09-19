@@ -5,6 +5,9 @@ tickets_hunter-main/
 launcher/chrome_profile/
 chrome-for-testing/
 
+# 本機輔助檔（不上傳）
+登入GitHub.bat
+
 # Python
 __pycache__/
 *.py[cod]
