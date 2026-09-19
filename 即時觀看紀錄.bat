@@ -1,6 +1,5 @@
 @echo off
-chcp 65001 >nul
-title TicketSniper - å³æ™‚è¾¨è­˜ç´€éŒ„
+title TicketSniper - §Y®É¿ëÃÑ¬ö¿ı
 cd /d "%~dp0server"
 python -u watch_log.py
 pause

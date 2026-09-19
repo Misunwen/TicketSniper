@@ -1,23 +1,19 @@
 @echo off
-chcp 65001 >nul
-title TicketSniper - å®‰è£ Python å¥—ä»¶
+title TicketSniper - ¦w¸Ë Python ®M¥ó
 color 0E
 cd /d "%~dp0server"
-
 echo ===================================================
-echo    TicketSniper - å®‰è£ Python å¥—ä»¶
+echo    TicketSniper - ¦w¸Ë Python ®M¥ó
 echo ===================================================
 echo.
-
 python --version >nul 2>&1
 if %errorlevel% neq 0 (
     color 0C
-    echo [éŒ¯èª¤] æ‰¾ä¸åˆ° Pythonã€‚è«‹å…ˆå®‰è£ä¸¦å‹¾é¸ "Add Python to PATH"ã€‚
+    echo [¿ù»~] §ä¤£¨ì Python¡C½Ğ¥ı¦w¸Ë¨Ã¤Ä¿ï "Add Python to PATH"¡C
     pause
     exit /b
 )
-
 pip install -r requirements.txt
 echo.
-echo å®‰è£å®Œæˆã€‚
+echo ¦w¸Ë§¹¦¨¡C
 pause
