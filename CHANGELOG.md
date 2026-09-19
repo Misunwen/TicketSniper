@@ -30,6 +30,7 @@
 
 ### Notes
 - `server/models` 內模型來自 tickets_hunter（GPL-3.0），出處見 `server/models/NOTICE.txt`。
+- 本專案採 GNU GPL-3.0（見 `LICENSE`）。
 
 ## [1.0] - 2026-09-19
 
