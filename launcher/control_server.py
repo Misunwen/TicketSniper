@@ -134,10 +134,10 @@ class ControlServer:
             await tab.send(cdp_input.dispatch_mouse_event(
                 type_='mouseMoved', x=mx, y=my, buttons=0))
 
-        # 模擬滑鼠移動：隨機起點、2~4 段、每段 110~150ms
-        sx = x + random.randint(-140, 140)
-        sy = y + random.randint(-90, 90)
-        steps = random.randint(2, 4)
+        # 模擬滑鼠移動：目標附近小範圍擺動（避免跑到視窗外），2~3 段、每段 110~150ms
+        sx = max(5.0, min(x + random.randint(-45, 45), 1915.0))
+        sy = max(5.0, min(y + random.randint(-35, 35), 1000.0))
+        steps = random.randint(2, 3)
         for i in range(1, steps + 1):
             t = i / steps
             ease = 2 * t * t if t < 0.5 else -1 + (4 - 2 * t) * t

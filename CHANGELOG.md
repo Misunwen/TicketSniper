@@ -4,6 +4,40 @@
 格式參考 [Keep a Changelog](https://keepachangelog.com/zh-TW/1.1.0/)，
 版本號遵循 [Semantic Versioning](https://semver.org/lang/zh-TW/)。
 
+## [1.4.2] - 2026-09-20
+
+### Added
+- 各平台自動化**獨立開關**：拓元 `tixcraftAuto`、KKTIX `kktixAuto`（IBON 已有 `ibonAuto`），
+  可在 popup 單獨關閉某個平台的自動化，方便隔離測試。
+- launcher `clean_profile`（預設 true）：**啟動與關閉時清空瀏覽資料**
+  （cookie／快取／歷史／登入／Local Storage…），但**保留擴充功能設定**
+  （`Default/Local Extension Settings`）與 **`Secure Preferences`（開發人員模式狀態）**。
+  每次啟動都是乾淨資料、popup 設定與開發人員模式不流失。
+
+### Fixed
+- IBON 運動類數量頁（`UTK0202_.aspx`）現在也會設定張數（原本只處理表演類 `UTK0201_001`）；
+  「下一步」按鈕尋找放寬（含 `__doPostBack` 連結與「確認／送出」字樣）。
+- IBON **未設定區域關鍵字**時，改為自動選「最高票價」的可選區域去點擊（原本直接放棄）。
+- KKTIX 同意條款：`ensureChecked` 增加「點關聯 `<label>`」步驟；並在勾選後 0.7 秒複查，
+  若被 Angular 重繪取消會在 LOG 顯示 `⚠️ 同意條款又被取消`。
+- KKTIX 同意條款未打勾：`ensureChecked` 不再用 `clickElement`（會退回 `humanClick` 的合成
+  click，導致 Angular 被雙擊切換）；改為「有 CDP 受信任點擊才用 → 原生 `.click()` →
+  原生 setter＋事件」。另外改為**每輪確認、未勾就重勾**，避免 Angular 重繪把已勾選取消。
+- 拓元選區：`clickElement` 後**偵測是否跳頁，未跳頁就自動重試**（避免受信任點擊未生效而卡住）；
+  並把 CDP 模擬滑鼠移動改為**目標附近小範圍**（避免座標因頁面微幅變動而失準）。
+
+### Changed
+- launcher：`open_extensions_page` 預設改為 `true`（啟動後自動開啟 `chrome://extensions`）。
+  開發人員模式（`extensions.ui.developer_mode`）為 Chrome 受保護設定（MAC），
+  **程式無法代開、每次啟動都需手動開啟一次**（已於 `Directions.txt` 說明）。
+- **popup 面板重新分組**：共用設定放最上面，接著「平台自動化」（拓元／KKTIX／IBON 各自分組、
+  同平台選項放一起），再來「驗證碼辨識（拓元）」與「紀錄」。
+- **Cloudflare 處理先維持 v1.4 版**（偵測 + 驅動內建 `verify_cf()`）；三層偵測／DOM pierce
+  點擊版先擱置，改回測試。
+- 新增 `overwrite_prefs`（預設 true）：啟動前把 profile 偏好寫成一般使用者樣貌
+  （關密碼管理／通知／翻譯／SafeBrowsing、DNS-over-HTTPS 關閉）。
+- `STEALTH_ARGS` 的 `--disable-features` 補上 `IsolateOrigins,site-per-process`（+ `TranslateUI`）。
+
 ## [1.4.1] - 2026-09-20
 
 ### Added

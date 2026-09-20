@@ -39,6 +39,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const kktixSeatMode    = $('kktixSeatMode');
     const ibonAuto         = $('ibonAuto');
     const ibonAutoNext     = $('ibonAutoNext');
+    const tixcraftAuto     = $('tixcraftAuto');
+    const kktixAuto        = $('kktixAuto');
     const playSound        = $('playSound');
 
     const serverStatus     = $('serverStatus');
@@ -68,6 +70,7 @@ document.addEventListener('DOMContentLoaded', () => {
     chrome.storage.local.get([
         'autoCheck', 'autoReload', 'dropdownValue', 'autoClickZone', 'zoneKeywords', 'autoSubmit',
         'keywordExclude', 'areaSelectMode', 'areaAutoFallback', 'playSound', 'kktixSeatMode', 'ibonAuto', 'ibonAutoNext',
+        'tixcraftAuto', 'kktixAuto',
         'autoFill', 'autoRun', 'yiiHashEnabled', 'serverUrl', 'typingMode', 'captchaLength', 'recognizeTimes',
         'savedSelector', 'debugLog'
     ], (data) => {
@@ -84,6 +87,8 @@ document.addEventListener('DOMContentLoaded', () => {
         kktixSeatMode.value = data.kktixSeatMode || 'none';
         if (data.ibonAuto !== undefined) ibonAuto.checked = data.ibonAuto;
         if (data.ibonAutoNext !== undefined) ibonAutoNext.checked = data.ibonAutoNext;
+        if (data.tixcraftAuto !== undefined) tixcraftAuto.checked = data.tixcraftAuto;
+        if (data.kktixAuto !== undefined) kktixAuto.checked = data.kktixAuto;
 
         if (data.autoFill !== undefined) autoFill.checked = data.autoFill;
         if (data.autoRun !== undefined) autoRun.checked = data.autoRun;
@@ -128,6 +133,8 @@ document.addEventListener('DOMContentLoaded', () => {
     kktixSeatMode.addEventListener('change', () => chrome.storage.local.set({ kktixSeatMode: kktixSeatMode.value }));
     ibonAuto.addEventListener('change', () => chrome.storage.local.set({ ibonAuto: ibonAuto.checked }));
     ibonAutoNext.addEventListener('change', () => chrome.storage.local.set({ ibonAutoNext: ibonAutoNext.checked }));
+    tixcraftAuto.addEventListener('change', () => chrome.storage.local.set({ tixcraftAuto: tixcraftAuto.checked }));
+    kktixAuto.addEventListener('change', () => chrome.storage.local.set({ kktixAuto: kktixAuto.checked }));
     playSound.addEventListener('change', () => chrome.storage.local.set({ playSound: playSound.checked }));
 
     autoFill.addEventListener('change', () => chrome.storage.local.set({ autoFill: autoFill.checked }));

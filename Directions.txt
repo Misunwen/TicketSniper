@@ -88,13 +88,18 @@ TicketSniper/
   按「清除紀錄」可清空已累積的紀錄（不需重整）。
 
 ----------------------------------------
- 第四步（可選）：用 nodriver 啟動瀏覽器（全自動）
+ 第四步（可選）：用瀏覽器啟動器（全自動）
 ----------------------------------------
 雙擊「啟動瀏覽器.bat」即可，它會自動完成：
 1. 檢查並安裝 OCR 伺服器套件，確認 ddddocr 版本為 1.5.6（自訓練模型需求）。
 2. 啟動 OCR 伺服器，並等到 /health 就緒。
 3. 自動下載並使用 Chrome for Testing（支援自動載入外掛，僅第一次下載）。
 4. 用 nodriver 開專用設定檔、自動載入 extension、導到目標網址。
+
+⚠️ 每次啟動後請手動開啟「開發人員模式」：Chrome 把 `extensions.ui.developer_mode`
+   列為受保護設定（有 MAC 簽章），**程式無法代為開啟**，只能手動。
+   啟動後會自動開好 `chrome://extensions`，把**右上角「開發人員模式」切到開啟**即可。
+   （這樣才能看到「重新載入」按鈕；外掛本身即使不開也會自動載入、正常運作。）
 
 ⚠️ 重要（IBON 平台）：IBON 的售票流程（Cloudflare + Queue-it）會**擋啟動器使用的
    Chrome for Testing / nodriver 環境**，出現「連線暫時受限 / Access Temporarily
@@ -115,6 +120,8 @@ TicketSniper/
   * server_url：OCR 伺服器網址（預設 http://127.0.0.1:5000）。
   * start_server：false 則不自動啟動伺服器。
   * browser_executable_path：指定瀏覽器執行檔（留空則用 Chrome for Testing）。
+  * open_extensions_page：預設 true。啟動後自動開啟 chrome://extensions
+    （開發人員模式會自動開啟，可直接按重新載入外掛）。
   * trusted_click：true（預設）時，點擊改用 CDP 受信任滑鼠事件（較不易被偵測）。
   * control_port：受信任點擊控制埠（預設 5100，僅綁定 127.0.0.1）。
   * block_trackers：預設 false。設 true 會封鎖分析／追蹤／側錄請求；但部分平台
@@ -122,7 +129,10 @@ TicketSniper/
   * save_log：預設 true，會把啟動器輸出同步寫入 launcher/launcher_log.txt。
   * driver：預設 "zendriver"（nodriver 維護分支，stealth 較新）；可改 "nodriver"。
   * cf_auto_solve：預設 true。啟動器會定期偵測 Cloudflare 驗證頁並自動處理
-    （Turnstile / Just a moment）；失敗時請手動點一下。
+    （以 CDP 穿透找 Turnstile checkbox 點擊，失敗才用內建 verify_cf）；失敗時請手動點一下。
+  * overwrite_prefs：預設 true。啟動前把 profile 偏好寫成一般使用者樣貌（降低指紋）。
+  * clean_profile：預設 true。啟動與關閉時清空瀏覽資料（cookie／快取／歷史／登入…），
+    但保留擴充功能設定與開發人員模式狀態（popup 設定不流失）；每次啟動都是乾淨資料。
   * cookies / cookies_file：注入登入 cookie（讓瀏覽器帶已登入 session）。
     cookies 為 JSON 陣列，或 cookies_file 指向 JSON 檔（格式見 launcher/cookies.example.json）。
     例：cookies_file 設 "cookies.json"（請自行把範例複製成 cookies.json 並填入）。
@@ -157,6 +167,9 @@ TicketSniper/
  常見問題
 ----------------------------------------
 - 顯示無法連線：確認黑色伺服器視窗還在、網址是 127.0.0.1:5000。
+- 開發人員模式每次都要手動開？ 是。Chrome 把 `extensions.ui.developer_mode` 列為受保護設定
+  （有 MAC 簽章），程式無法代為開啟；每次啟動後到自動開啟的 `chrome://extensions`，
+  把右上角「開發人員模式」切到開啟即可（只是為了看到「重新載入」按鈕，外掛仍會自動載入）。
 - 讀不到 hash：該頁可能沒有 yiiCaptcha 外掛，通常不影響辨識。
 - 改了程式沒生效：到 chrome://extensions/ 重新載入擴充功能，並重啟伺服器。
 - 一次只開一個伺服器視窗，重複開啟會佔用同一個 port。

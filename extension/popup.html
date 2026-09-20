@@ -50,12 +50,17 @@
         .secondary-btn:hover { background: #1976d2; }
         .danger-btn { background: #b23b3b; color: #fff; font-size: 12px; padding: 8px; }
         .danger-btn:hover { background: #972f2f; }
-        .buttons { display: flex; flex-direction: column; gap: 7px; margin-bottom: 10px; }
-        #field-info { background: #17301b; border: 1px solid #2e6b36; border-radius: 6px; padding: 8px 10px; margin-bottom: 10px; font-size: 12px; color: #a5e0ad; word-break: break-all; }
-        #result { background: #1e2228; border-left: 4px solid #4CAF50; border-radius: 6px; padding: 10px; margin-bottom: 10px; font-size: 13px; min-height: 20px; word-break: break-all; display: none; }
+        .buttons { display: flex; flex-direction: column; gap: 7px; }
+        #field-info { background: #17301b; border: 1px solid #2e6b36; border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; font-size: 12px; color: #a5e0ad; word-break: break-all; }
+        #result { background: #1e2228; border-left: 4px solid #4CAF50; border-radius: 6px; padding: 10px; margin-top: 8px; font-size: 13px; min-height: 20px; word-break: break-all; display: none; }
         #result.loading { border-color: #f39c12; color: #f5c26b; }
         #result.success { border-color: #4CAF50; color: #a5e0ad; }
         #result.error { border-color: #e74c3c; color: #ff9d9d; }
+        /* 平台子分組 */
+        .subgroup { margin-top: 8px; padding-top: 8px; border-top: 1px dashed #2b3138; }
+        .subgroup:first-of-type { margin-top: 0; padding-top: 0; border-top: none; }
+        .sub-h { font-size: 12px; font-weight: 700; color: #8fb7ff; margin-bottom: 6px; letter-spacing: .5px; }
+        .sub { margin-left: 20px; }
         .footer { text-align: center; font-size: 11px; color: #56606b; margin-top: 4px; }
     </style>
 </head>
@@ -63,9 +68,19 @@
 <div class="container">
     <h2>🎯 TicketSniper</h2>
 
-    <!-- 自動操作 -->
+    <!-- 狀態 -->
+    <div class="status-bar">
+        <span>🖥️ 伺服器狀態：</span>
+        <span id="serverStatus" style="font-weight:bold;color:#f39c12;">🟡 檢查中...</span>
+    </div>
+    <div class="status-bar">
+        <span>🔐 Yii2 hash：</span>
+        <span id="hashStatus" style="font-weight:bold;color:#999;">— 未檢查</span>
+    </div>
+
+    <!-- 共用設定（全平台） -->
     <div class="section">
-        <h3>🖱️ 自動操作</h3>
+        <h3>🔧 共用設定（全平台）</h3>
         <div class="item">
             <label class="line"><input type="checkbox" id="autoCheck"> 自動勾選「同意服務條款」</label>
         </div>
@@ -107,39 +122,53 @@
             <label class="line"><input type="checkbox" id="areaAutoFallback"> 關鍵字找不到時自動遞補（依選區順序）</label>
         </div>
         <div class="item">
-            <label class="cap">KKTIX 選好票數後自動按：</label>
-            <select id="kktixSeatMode">
-                <option value="none">不自動（手動按）</option>
-                <option value="self">自動按「自行選位」</option>
-                <option value="auto">自動按「電腦配位／電腦選位」</option>
-            </select>
-            <div class="hint">若該頁沒有選位選項（只有「下一步」），會自動按「下一步」。</div>
-        </div>
-        <div class="item">
-            <label class="line"><input type="checkbox" id="ibonAuto" checked> IBON 自動化（擴充功能）</label>
-            <div class="hint">若改用 launcher 的 CDP 模式（config 的 ibon_auto），請取消此項以免重複操作。</div>
-        </div>
-        <div class="item">
-            <label class="line"><input type="checkbox" id="ibonAutoNext" checked> IBON 選完張數後自動按「下一步」</label>
-            <div class="hint">數量頁設定好張數後自動送出下一步（可能直接進訂單確認，請自行評估）。</div>
-        </div>
-        <div class="item">
             <label class="line"><input type="checkbox" id="playSound"> 搶到票／送出成功時播放提示音</label>
         </div>
     </div>
 
-    <!-- 驗證碼 -->
-    <div class="status-bar">
-        <span>🖥️ 伺服器狀態：</span>
-        <span id="serverStatus" style="font-weight:bold;color:#f39c12;">🟡 檢查中...</span>
-    </div>
-    <div class="status-bar">
-        <span>🔐 Yii2 hash：</span>
-        <span id="hashStatus" style="font-weight:bold;color:#999;">— 未檢查</span>
+    <!-- 平台自動化 -->
+    <div class="section">
+        <h3>🎯 平台自動化</h3>
+
+        <div class="subgroup">
+            <div class="sub-h">拓元</div>
+            <div class="item">
+                <label class="line"><input type="checkbox" id="tixcraftAuto" checked> 自動化（勾同意／選區／選票）</label>
+            </div>
+        </div>
+
+        <div class="subgroup">
+            <div class="sub-h">KKTIX</div>
+            <div class="item">
+                <label class="line"><input type="checkbox" id="kktixAuto" checked> 自動化（勾同意／選票）</label>
+            </div>
+            <div class="item sub">
+                <label class="cap">選好票數後自動按：</label>
+                <select id="kktixSeatMode">
+                    <option value="none">不自動（手動按）</option>
+                    <option value="self">自動按「自行選位」</option>
+                    <option value="auto">自動按「電腦配位／電腦選位」</option>
+                </select>
+                <div class="hint">若該頁只有「下一步」，會自動按「下一步」。</div>
+            </div>
+        </div>
+
+        <div class="subgroup">
+            <div class="sub-h">IBON</div>
+            <div class="item">
+                <label class="line"><input type="checkbox" id="ibonAuto" checked> 自動化（擴充功能）</label>
+                <div class="hint">若改用 launcher 的 CDP 模式（config 的 ibon_auto），請取消此項以免重複。</div>
+            </div>
+            <div class="item sub">
+                <label class="line"><input type="checkbox" id="ibonAutoNext" checked> 選完張數後自動按「下一步」</label>
+                <div class="hint">數量頁設定好張數後自動送出下一步（可能直接進訂單確認，請自行評估）。</div>
+            </div>
+        </div>
     </div>
 
+    <!-- 驗證碼辨識（拓元） -->
     <div class="section">
-        <h3>🧩 驗證碼辨識</h3>
+        <h3>🧩 驗證碼辨識（拓元）</h3>
         <div class="item">
             <label class="line"><input type="checkbox" id="autoFill" checked> 識別後自動填入輸入框</label>
         </div>
@@ -151,10 +180,6 @@
         </div>
         <div class="item">
             <label class="line"><input type="checkbox" id="autoSubmit" class="danger"> ⚠️ 驗證碼填完後自動送出／下一步</label>
-        </div>
-        <div class="item">
-            <label class="cap">伺服器網址：</label>
-            <input type="text" id="serverUrl" placeholder="http://127.0.0.1:5000">
         </div>
         <div class="item">
             <label class="cap">輸入模式：</label>
@@ -170,8 +195,28 @@
             <input type="number" id="recognizeTimes" class="small-num" value="1" min="1" max="5">
         </div>
         <div class="hint">長度 1–10；重試 1–5（長度不符才續試）</div>
+
+        <div class="subgroup">
+            <div class="sub-h">辨識伺服器</div>
+            <div class="item">
+                <label class="cap">伺服器網址：</label>
+                <input type="text" id="serverUrl" placeholder="http://127.0.0.1:5000">
+            </div>
+        </div>
+
+        <div id="field-info" style="display:none;">
+            <strong>已選擇輸入框：</strong><span id="fieldName"></span>
+        </div>
+
+        <div class="buttons" style="margin-top:8px;">
+            <button id="selectBtn" class="secondary-btn">🖱️ 手動選擇驗證碼輸入框</button>
+            <button id="recognizeBtn" class="primary-btn">🔍 識別驗證碼（F4 重新讀取）</button>
+            <button id="clearBtn" class="danger-btn">🗑️ 清除選擇的輸入框</button>
+        </div>
+        <div id="result"></div>
     </div>
 
+    <!-- 紀錄 -->
     <div class="section">
         <h3>📝 紀錄（回報用）</h3>
         <div class="item">
@@ -181,18 +226,6 @@
         <button id="exportLogBtn" class="secondary-btn">💾 匯出紀錄 (.txt)</button>
         <button id="clearLogBtn" class="danger-btn" style="margin-top:7px;">🗑️ 清除紀錄</button>
     </div>
-
-    <div id="field-info" style="display:none;">
-        <strong>已選擇輸入框：</strong><span id="fieldName"></span>
-    </div>
-
-    <div class="buttons">
-        <button id="selectBtn" class="secondary-btn">🖱️ 手動選擇驗證碼輸入框</button>
-        <button id="recognizeBtn" class="primary-btn">🔍 識別驗證碼（F4 重新讀取）</button>
-        <button id="clearBtn" class="danger-btn">🗑️ 清除選擇的輸入框</button>
-    </div>
-
-    <div id="result"></div>
 
     <div class="footer">地端辨識，不外傳圖片 · v<span id="appVersion">1.1</span></div>
 </div>

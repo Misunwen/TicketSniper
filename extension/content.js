@@ -369,15 +369,32 @@ async function ensureChecked(cb) {
     if (!cb) return false;
     for (let i = 0; i < 4; i++) {
         if (cb.checked) return true;
-        // 1) CDP 受信任點擊優先（launcher 模式；含模擬滑鼠移動）
-        try { await clickElement(cb); } catch (e) {}
-        await sleep(randInt(110, 150));
-        if (cb.checked) return true;
-        // 2) 原生 .click()（會 toggle 並觸發 change，Angular 才會更新）
+        // 1) 若有 CDP 受信任點擊（launcher 模式）才用；不退回 humanClick，
+        //    避免 checkbox 被合成 click 雙擊切換而變成沒打勾。
+        let trustedOk = false;
+        try { trustedOk = await trustedClick(cb); } catch (e) {}
+        if (trustedOk) {
+            await sleep(randInt(110, 150));
+            if (cb.checked) return true;
+        }
+        // 2) 原生 .click()（單次 toggle 並觸發 change，Angular 才會更新）
         try { cb.click(); } catch (e) {}
         await sleep(randInt(110, 150));
         if (cb.checked) return true;
-        // 3) 原生 setter + input/change 事件
+        // 3) 點關聯的 label（有些站的視覺勾選由 label 驅動）
+        let lab = null;
+        try {
+            if (cb.id) lab = document.querySelector(`label[for="${cb.id}"]`);
+            if (!lab) lab = cb.closest('label');
+        } catch (e) {}
+        if (lab && lab !== cb) {
+            let labOk = false;
+            try { labOk = await trustedClick(lab); } catch (e) {}
+            if (!labOk) { try { lab.click(); } catch (e) {} }
+            await sleep(randInt(110, 150));
+            if (cb.checked) return true;
+        }
+        // 4) 原生 setter + input/change 事件
         try {
             setNativeChecked(cb, true);
             cb.dispatchEvent(new Event('input', { bubbles: true }));
@@ -849,8 +866,17 @@ async function runIBONQty(settings) {
 async function clickIBONNext() {
     let el = document.querySelector('#ctl00_ContentPlaceHolder1_A2');
     if (!el) {
-        el = Array.from(document.querySelectorAll('a, button, input[type="submit"]'))
-            .find(e => ((e.innerText || e.value || '').trim() === '下一步'));
+        const words = ['下一步', '確認', '確定', '送出', '下一頁'];
+        el = Array.from(document.querySelectorAll('a, button, input[type="submit"], input[type="button"]'))
+            .find(e => {
+                const t = ((e.innerText || e.value || '') + '').trim();
+                return words.some(w => t === w || t.includes(w));
+            });
+    }
+    if (!el) {
+        // 退而求其次：任何 __doPostBack 連結（取最後一個，通常是「下一步/確認」）
+        const pb = Array.from(document.querySelectorAll('a[href*="__doPostBack"]'));
+        if (pb.length > 0) el = pb[pb.length - 1];
     }
     if (!el) {
         extLog('ℹ️ [IBON] 找不到「下一步」按鈕');
@@ -1025,8 +1051,8 @@ async function runIBON(settings) {
     
     let url = window.location.href;
     
-    // ✅ 數量頁：直接設定張數
-    if (url.includes('UTK0201_001')) {
+    // ✅ 數量頁：直接設定張數（表演 UTK0201_001、運動 UTK0202）
+    if (url.includes('UTK0201_001') || url.includes('UTK0202')) {
         extLog(`📋 [IBON] 數量頁，設定張數：${dropdownValue}`);
         await runIBONQty(settings);
         return;
@@ -1087,6 +1113,21 @@ async function runIBON(settings) {
     let keywordInfo = analyzeKeywordType(keywords);
     
     extLog(`💰 [關鍵字分析] 主要類型：${keywordInfo.type}，主值：${keywordInfo.value}`);
+
+    // 未設定關鍵字時：自動選「最高票價」的可選區域
+    if (autoClickZone && (!keywordInfo.priorityList || keywordInfo.priorityList.length === 0)) {
+        let avail = tableRows.filter(r => !r.isDisabled && r.seatText !== '已售完' && r.seatText !== '');
+        if (avail.length === 0) avail = tableRows.filter(r => !r.isDisabled);
+        let maxPrice = 0;
+        for (let r of avail) { const p = Number(r.price) || 0; if (p > maxPrice) maxPrice = p; }
+        if (maxPrice > 0) {
+            keywordInfo.type = 'PRICE';
+            keywordInfo.value = maxPrice;
+            keywordInfo.priceKeywords = [maxPrice];
+            keywordInfo.priorityList = [{ type: 'PRICE', value: maxPrice, original: String(maxPrice) }];
+            extLog(`💰 [IBON] 未設定關鍵字 → 自動選最高票價：${maxPrice}（可選 ${avail.length} 個）`);
+        }
+    }
     
     if (!keywordInfo.priorityList || keywordInfo.priorityList.length === 0) {
         extLog(`⚠️ [關鍵字分析] 沒有有效的關鍵字`);
@@ -1678,7 +1719,17 @@ function runTixCraft(settings) {
                                 playBeep('found');
                                 localIsClicking = true;
                                 isStopped = true;
+                                const _beforeUrl = location.href;
                                 await clickElement(best.link);
+                                await sleep(1600);
+                                if (location.href === _beforeUrl) {
+                                    extLog('⚠️ [拓元] 點擊後未跳頁，重試...');
+                                    localIsClicking = false;
+                                    isStopped = false;
+                                    isWaitingLogShown = false;
+                                    setTimeout(loop, randInt(400, 900));
+                                    return;
+                                }
                                 return;
                             } else {
                                 if (!isWaitingLogShown) {
@@ -1790,6 +1841,7 @@ function runKKTIX(settings) {
     let isWaitingLogShown = false;
     let localIsClicking = false;
     let agreeChecked = false;
+    let agreeDiagLogged = false;
     
     function extractPrice(ticketUnit) {
         if (!ticketUnit) return 0;
@@ -1825,23 +1877,32 @@ function runKKTIX(settings) {
         attempts++;
         try {
             if (!localIsClicking) {
-                if (autoCheck && !agreeChecked) {
+                if (autoCheck) {
                     let cb = document.getElementById('person_agree_terms');
-                    if (cb) {
-                        if (cb.checked) {
-                            agreeChecked = true;
-                            extLog("✅ [KKTIX] 已勾選同意條款");
-                        } else {
-                            // 尚未真的打勾：重試（含受信任點擊／原生 setter），成功才繼續
-                            let ok = await ensureChecked(cb);
-                            if (ok) {
+                    if (!agreeDiagLogged) {
+                        agreeDiagLogged = true;
+                        extLog(cb ? `🔎 [KKTIX] 同意 checkbox 存在，checked=${cb.checked}`
+                                  : '⚠️ [KKTIX] 找不到 #person_agree_terms（同意條款）');
+                    }
+                    if (cb && !cb.checked) {
+                        // 未打勾就（重新）勾選；若 Angular 重繪取消，下一輪會再勾一次。
+                        let ok = await ensureChecked(cb);
+                        if (ok) {
+                            if (!agreeChecked) {
                                 agreeChecked = true;
                                 extLog("✅ [KKTIX] 已勾選同意條款");
-                            } else {
-                                setTimeout(loop, randInt(300, 500));
-                                return;
+                                setTimeout(() => {
+                                    const c = document.getElementById('person_agree_terms');
+                                    if (c && !c.checked) extLog('⚠️ [KKTIX] 同意條款又被取消（Angular 重繪）');
+                                }, 700);
                             }
+                        } else {
+                            setTimeout(loop, randInt(300, 500));
+                            return;
                         }
+                    } else if (cb && cb.checked && !agreeChecked) {
+                        agreeChecked = true;
+                        extLog("✅ [KKTIX] 已勾選同意條款");
                     }
                 }
                 
@@ -1971,7 +2032,8 @@ function startAutoFill() {
     
     chrome.storage.local.get(
         ['autoCheck', 'autoReload', 'dropdownValue', 'autoClickZone', 'zoneKeywords', 'autoSubmit',
-         'keywordExclude', 'areaSelectMode', 'areaAutoFallback', 'playSound', 'kktixSeatMode', 'ibonAuto', 'ibonAutoNext'],
+         'keywordExclude', 'areaSelectMode', 'areaAutoFallback', 'playSound', 'kktixSeatMode', 'ibonAuto', 'ibonAutoNext',
+         'tixcraftAuto', 'kktixAuto'],
         function(data) {
             let raw = data || {};
             let toBool = v => v === true || v === 'true';
@@ -1988,7 +2050,9 @@ function startAutoFill() {
                 areaSelectMode: raw.areaSelectMode || "from top to bottom",
                 kktixSeatMode: raw.kktixSeatMode || "none",
                 ibonAuto: raw.ibonAuto !== false,
-                ibonAutoNext: raw.ibonAutoNext !== false
+                ibonAutoNext: raw.ibonAutoNext !== false,
+                tixcraftAuto: raw.tixcraftAuto !== false,
+                kktixAuto: raw.kktixAuto !== false
             };
 
             window.__tsPlaySound = settings.playSound;
@@ -1997,8 +2061,8 @@ function startAutoFill() {
             extLog(`🚀 [路由] 平台：${platform}｜${window.location.href}`);
             extLog(`🚀 [路由] 設定：autoCheck=${settings.autoCheck}, autoReload=${settings.autoReload}, autoClickZone=${settings.autoClickZone}, mode=${settings.areaSelectMode}, kktixSeatMode=${settings.kktixSeatMode}`);
             
-            if (platform === 'TIXCRAFT') runTixCraft(settings);
-            else if (platform === 'KKTIX') runKKTIX(settings);
+            if (platform === 'TIXCRAFT') { if (settings.tixcraftAuto !== false) runTixCraft(settings); else extLog('ℹ️ [拓元] 自動化已關閉'); }
+            else if (platform === 'KKTIX') { if (settings.kktixAuto !== false) runKKTIX(settings); else extLog('ℹ️ [KKTIX] 自動化已關閉'); }
             else if (platform === 'IBON') runIBON(settings);
         }
     );

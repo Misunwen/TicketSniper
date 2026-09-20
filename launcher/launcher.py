@@ -57,7 +57,7 @@ DEFAULTS = {
     "window_size": [1280, 900],
     "try_load_extension": True,
     "extension_dir": "../extension",
-    "open_extensions_page": False,
+    "open_extensions_page": True,
     "start_server": True,
     "server_url": "http://127.0.0.1:5000",
     "trusted_click": True,
@@ -65,6 +65,8 @@ DEFAULTS = {
     "block_trackers": False,
     "save_log": True,
     "driver": "zendriver",
+    "overwrite_prefs": True,
+    "clean_profile": True,
     "cf_auto_solve": True,
     "cf_check_interval": 3,
     "cookies": [],
@@ -214,6 +216,83 @@ def load_driver(name):
         print(f"❌ 找不到 zendriver 或 nodriver：{e}")
         print("   請先執行 安裝套件.bat 或 pip install -r launcher/requirements.txt")
         raise SystemExit(1)
+
+
+def clean_profile(profile):
+    """清空 profile 的使用者資料（cookie／快取／歷史／登入…），
+    但保留擴充功能設定（chrome.storage.local 存在 Default/Local Extension Settings）。"""
+    default_dir = profile / 'Default'
+    if default_dir.exists():
+        # 保留擴充功能設定，以及 Chrome 存「開發人員模式」狀態的 Secure Preferences
+        keep = {'Local Extension Settings', 'Secure Preferences'}
+        for item in list(default_dir.iterdir()):
+            if item.name in keep:
+                continue
+            try:
+                if item.is_dir():
+                    shutil.rmtree(item, ignore_errors=True)
+                else:
+                    item.unlink()
+            except Exception:
+                pass
+    # profile 根目錄的暫存（Local State 由 overwrite_prefs 重建）
+    for name in ['BrowserMetrics', 'Crashpad', 'ShaderCache', 'GrShaderCache',
+                 'GraphiteDawnCache', 'component_crx_cache', 'extensions_crx_cache',
+                 'Safe Browsing', 'segmentation_platform', 'OptimizationHints',
+                 'Local State']:
+        p = profile / name
+        try:
+            if p.is_dir():
+                shutil.rmtree(p, ignore_errors=True)
+            elif p.exists():
+                p.unlink()
+        except Exception:
+            pass
+
+
+def overwrite_prefs(profile):
+    """把 profile 偏好寫成一般使用者樣貌（降低指紋），參考 tickets_hunter。
+    保留既有設定，只補/覆寫特定欄位。"""
+    try:
+        default_dir = profile / 'Default'
+        default_dir.mkdir(parents=True, exist_ok=True)
+        pref_path = default_dir / 'Preferences'
+        data = {}
+        if pref_path.exists():
+            try:
+                data = json.loads(pref_path.read_text(encoding='utf-8'))
+            except Exception:
+                data = {}
+        data.setdefault('credentials_enable_service', False)
+        prof = data.get('profile') or {}
+        prof.setdefault('name', 'Person 1')
+        prof['password_manager_enabled'] = False
+        dcv = prof.get('default_content_setting_values') or {}
+        dcv['notifications'] = 2
+        prof['default_content_setting_values'] = dcv
+        data['profile'] = prof
+        data['translate'] = {'enabled': False}
+        sb = data.get('safebrowsing') or {}
+        sb['enabled'] = False
+        sb['enhanced'] = False
+        data['safebrowsing'] = sb
+        # 注意：不要寫 extensions.ui.developer_mode（Chrome 會視為竄改而重置）。
+        # 開發人員模式由 Secure Preferences 管理，clean_profile 會保留該檔。
+        pref_path.write_text(json.dumps(data, ensure_ascii=False), encoding='utf-8')
+
+        state_path = profile / 'Local State'
+        st = {}
+        if state_path.exists():
+            try:
+                st = json.loads(state_path.read_text(encoding='utf-8'))
+            except Exception:
+                st = {}
+        dns = st.get('dns_over_https') or {}
+        dns['mode'] = 'off'
+        st['dns_over_https'] = dns
+        state_path.write_text(json.dumps(st, ensure_ascii=False), encoding='utf-8')
+    except Exception as e:
+        print(f"⚠ 寫入 profile 偏好失敗（不影響啟動）：{e}")
 
 
 # =========================================================================
@@ -405,7 +484,7 @@ async def apply_cookies(tab, cookies, cdp):
 
 
 # =========================================================================
-# Cloudflare 驗證處理（Turnstile / Just a moment）
+# Cloudflare 驗證處理（v1.4 版：偵測 + 驅動內建 verify_cf）
 # =========================================================================
 async def maybe_solve_cloudflare(tab, cfg):
     try:
@@ -450,6 +529,11 @@ async def main(uc, cdp):
     ext = resolve(cfg['extension_dir'])
     url = (cfg.get('url') or '').strip()
     profile.mkdir(parents=True, exist_ok=True)
+    if cfg.get('clean_profile', True):
+        clean_profile(profile)
+        print("🧹 已清除上次的瀏覽資料（保留擴充功能設定）")
+    if cfg.get('overwrite_prefs', True):
+        overwrite_prefs(profile)
 
     # CDP 受信任點擊：先產生 token／port，讓 OCR 伺服器能提供給擴充功能
     control_token = secrets.token_urlsafe(24)
@@ -470,7 +554,7 @@ async def main(uc, cdp):
     ws = cfg.get('window_size') or []
     if len(ws) == 2:
         args.append(f"--window-size={ws[0]},{ws[1]}")
-    disabled_features = ["TranslateUI"]
+    disabled_features = ["IsolateOrigins", "site-per-process", "TranslateUI"]
     if cfg.get('try_load_extension') and ext.exists():
         args.append(f"--load-extension={ext}")
         if not using_cft:
@@ -604,6 +688,13 @@ async def main(uc, cdp):
         if server_proc:
             try:
                 server_proc.terminate()
+            except Exception:
+                pass
+        if cfg.get('clean_profile', True):
+            try:
+                await asyncio.sleep(1.0)
+                clean_profile(profile)
+                print("🧹 已清除本次使用資料（保留擴充功能設定）")
             except Exception:
                 pass
 
