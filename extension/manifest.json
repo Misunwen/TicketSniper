@@ -1,7 +1,8 @@
 {
   "manifest_version": 3,
   "name": "TicketSniper",
-  "version": "1.4.2",
+  "version": "1.4.3",
+  "minimum_chrome_version": "111",
   "description": "Chrome 擴充功能 + 地端 ddddocr 驗證碼辨識（網頁表單自動化）",
   "icons": {
     "16": "icon.png",
@@ -42,6 +43,14 @@
       ],
       "js": ["content.js"],
       "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "*://*.ibon.com.tw/*"
+      ],
+      "js": ["silence_dialogs.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
     }
   ],
   "web_accessible_resources": [

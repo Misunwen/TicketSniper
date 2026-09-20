@@ -4,6 +4,7 @@
 // 除錯紀錄開關（由 popup 控制，預設關）：關閉時完全不記錄、不輸出。
 let _debugLog = false;
 window.botLogs = [];
+let _ibonNextUrl = '';
 try {
     chrome.storage.local.get(['debugLog'], d => { _debugLog = !!(d && d.debugLog); });
     chrome.storage.onChanged.addListener((changes, area) => {
@@ -367,26 +368,16 @@ function setNativeChecked(el, checked) {
 
 async function ensureChecked(cb) {
     if (!cb) return false;
+    // 找關聯的 <label>：點 label 會觸發「原生 toggle + change」，
+    // Angular 的 ng-model 才會真的更新（否則會出現 DOM 已勾、model 仍 false）。
+    let lab = null;
+    try {
+        if (cb.id) lab = document.querySelector(`label[for="${cb.id}"]`);
+        if (!lab) lab = cb.closest('label');
+    } catch (e) {}
     for (let i = 0; i < 4; i++) {
         if (cb.checked) return true;
-        // 1) 若有 CDP 受信任點擊（launcher 模式）才用；不退回 humanClick，
-        //    避免 checkbox 被合成 click 雙擊切換而變成沒打勾。
-        let trustedOk = false;
-        try { trustedOk = await trustedClick(cb); } catch (e) {}
-        if (trustedOk) {
-            await sleep(randInt(110, 150));
-            if (cb.checked) return true;
-        }
-        // 2) 原生 .click()（單次 toggle 並觸發 change，Angular 才會更新）
-        try { cb.click(); } catch (e) {}
-        await sleep(randInt(110, 150));
-        if (cb.checked) return true;
-        // 3) 點關聯的 label（有些站的視覺勾選由 label 驅動）
-        let lab = null;
-        try {
-            if (cb.id) lab = document.querySelector(`label[for="${cb.id}"]`);
-            if (!lab) lab = cb.closest('label');
-        } catch (e) {}
+        // 1) 點 label（受信任點擊優先，其次原生 label.click()）
         if (lab && lab !== cb) {
             let labOk = false;
             try { labOk = await trustedClick(lab); } catch (e) {}
@@ -394,7 +385,13 @@ async function ensureChecked(cb) {
             await sleep(randInt(110, 150));
             if (cb.checked) return true;
         }
-        // 4) 原生 setter + input/change 事件
+        // 2) 點 input 本身（受信任點擊優先，其次原生 .click()）
+        let ok = false;
+        try { ok = await trustedClick(cb); } catch (e) {}
+        if (!ok) { try { cb.click(); } catch (e) {} }
+        await sleep(randInt(110, 150));
+        if (cb.checked) return true;
+        // 3) 原生 setter + input/change 事件
         try {
             setNativeChecked(cb, true);
             cb.dispatchEvent(new Event('input', { bubbles: true }));
@@ -887,6 +884,13 @@ async function clickIBONNext() {
     const m = href.match(/__doPostBack\('([^']*)','([^']*)'\)/);
     const target = m ? m[1] : (el.id || '');
 
+    // 同一頁只送一次（避免重複 postback）
+    if (_ibonNextUrl === location.href) {
+        extLog('ℹ️ [IBON] 本頁已送過「下一步」，略過');
+        return false;
+    }
+    _ibonNextUrl = location.href;
+
     // 1) launcher 模式：CDP 受信任點擊（等同真人點擊）
     try {
         if (await trustedClick(el)) {
@@ -895,10 +899,12 @@ async function clickIBONNext() {
         }
     } catch (e) {}
 
-    // 2) 直接呼叫頁面的 __doPostBack（合成 click 常只轉圈不送出）
+    // 2) 直接呼叫頁面的 __doPostBack（合成 click 常只轉圈不送出）；
+    //    先呼叫 onclick 的 showProcess() 再送出，貼近真實點擊
     if (target) {
         try {
-            window.postMessage({ type: IBON_BRIDGE_TOKEN, script: `__doPostBack('${target}','')` }, '*');
+            const script = `(function(){ try { if (typeof showProcess === 'function') showProcess(); } catch(e){} __doPostBack('${target}',''); })()`;
+            window.postMessage({ type: IBON_BRIDGE_TOKEN, script: script }, '*');
             extLog(`✅ [IBON] 已送出「下一步」(__doPostBack ${target})`);
             return true;
         } catch (e) {}
@@ -926,7 +932,7 @@ function detectIBONStep() {
     }
     
     let areas = document.querySelectorAll('area[href*="Send"], area[onclick*="Send"]');
-    let tableRows = findAllInShadow('tr[rel]');
+    let tableRows = document.querySelectorAll('tr[rel]');
     if (areas.length > 0 || tableRows.length > 0) {
         return 'STEP_SELECT_ZONE';
     }
@@ -1100,11 +1106,6 @@ async function runIBON(settings) {
     
     if (tableRows.length === 0) {
         extLog(`⚠️ [IBON] 等待 3 秒後仍未載入表格，停止掃描`);
-        let bodyHtml = document.body.innerHTML;
-        let match = bodyHtml.match(/<table[^>]*class="[^"]*table[^"]*"[^>]*>([\s\S]*?)<\/table>/i);
-        if (match) {
-            extLog(`🔍 [IBON] 在 body 中找到 table，長度: ${match[1].length}`);
-        }
         return;
     }
 

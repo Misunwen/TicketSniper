@@ -4,6 +4,22 @@
 格式參考 [Keep a Changelog](https://keepachangelog.com/zh-TW/1.1.0/)，
 版本號遵循 [Semantic Versioning](https://semver.org/lang/zh-TW/)。
 
+## [1.4.3] - 2026-09-20
+
+### Fixed
+- KKTIX 同意條款：改為**優先點關聯 `<label>`**（觸發原生 toggle＋change，Angular 的
+  `ng-model` 才會真正更新）；修正「DOM 顯示已勾、但 `ng-model` 仍 false（`ng-empty`）、
+  下一步不能按、且重繪後被取消」的問題。移除會持續重勾的 interval（避免設定關閉後仍勾）。
+- launcher：移除「每 2 秒巡所有分頁做 `Page.enable`」的迴圈（疑似造成**開新分頁時整個
+  Chrome 無回應**）；JS 對話框改由 ibon 專用的 `silence_dialogs.js`（MAIN world）處理。
+- IBON「下一步」：送出前先呼叫頁面的 `showProcess()` 再 `__doPostBack`（貼近真實點擊），
+  並新增「同一頁只送一次」避免重複 postback。
+- **IBON 造成 Chrome 無回應（Application Hang）**：IBON 首頁的 `window.alert()` 會卡住分頁。
+  新增 `extension/silence_dialogs.js`（僅 ibon、MAIN world、document_start）自動吞掉
+  `alert/confirm/prompt`；launcher 另加 CDP `Page.handleJavaScriptDialog` 自動關閉（含新分頁）。
+- 移除 IBON 流程中讀取整頁 `document.body.innerHTML` 的除錯碼（大頁面記憶體暴衝風險）；
+  IBON 步驟偵測不再掃描全部元素找 shadow DOM，改只查 `tr[rel]`。
+
 ## [1.4.2] - 2026-09-20
 
 ### Added

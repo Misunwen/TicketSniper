@@ -486,7 +486,12 @@ async def apply_cookies(tab, cookies, cdp):
 # =========================================================================
 # Cloudflare 驗證處理（v1.4 版：偵測 + 驅動內建 verify_cf）
 # =========================================================================
+_cf_last_url = ''
+_cf_last_time = 0.0
+
+
 async def maybe_solve_cloudflare(tab, cfg):
+    global _cf_last_url, _cf_last_time
     try:
         title = (tab.title or '')
     except Exception:
@@ -509,6 +514,16 @@ async def maybe_solve_cloudflare(tab, cfg):
             is_cf = False
     if not is_cf:
         return False
+    # 同一頁 30 秒內只處理一次，避免反覆 verify_cf
+    try:
+        url = tab.url or ''
+    except Exception:
+        url = ''
+    now = time.time()
+    if url and url == _cf_last_url and (now - _cf_last_time) < 30:
+        return False
+    _cf_last_url = url
+    _cf_last_time = now
     print("🛡️ 偵測到 Cloudflare 驗證，嘗試自動處理（或請手動點一下）...")
     try:
         await tab.verify_cf()
@@ -517,6 +532,38 @@ async def maybe_solve_cloudflare(tab, cfg):
     except Exception as e:
         print(f"⚠ Cloudflare 自動處理失敗（請手動完成）：{e}")
         return False
+
+
+# =========================================================================
+# JS 對話框自動關閉（IBON 首頁會 alert，會讓分頁無回應）
+# =========================================================================
+_dialog_hooked = set()
+
+
+async def enable_dialog_autodismiss(tab, cdp):
+    try:
+        tid = tab.target_id
+    except Exception:
+        tid = None
+    if tid is not None and tid in _dialog_hooked:
+        return
+    if tid is not None:
+        _dialog_hooked.add(tid)
+    try:
+        await tab.send(cdp.page.enable())
+    except Exception:
+        pass
+
+    async def on_dialog(event):
+        try:
+            await tab.send(cdp.page.handle_java_script_dialog(accept=True))
+        except Exception:
+            pass
+
+    try:
+        tab.add_handler(cdp.page.JavascriptDialogOpening, on_dialog)
+    except Exception:
+        pass
 
 
 # =========================================================================
@@ -591,6 +638,12 @@ async def main(uc, cdp):
             except Exception:
                 pass
         return
+
+    # 3.4) 自動關閉 JS 對話框（IBON 首頁 alert 會造成分頁無回應）
+    try:
+        await enable_dialog_autodismiss(browser.main_tab, cdp)
+    except Exception:
+        pass
 
     # 3.5) 封鎖追蹤／分析請求
     if cfg.get('block_trackers', False):
